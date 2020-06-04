@@ -9,13 +9,15 @@ from smartcard.sw.SWExceptions import SWException
 from .JCconstants import JCconstants
 from .CardDataParser import CardDataParser
 from .TxParser import TxParser
-from .ecc import ECPubkey, msg_magic
+from .ecc import ECPubkey, ECPrivkey, msg_magic
 from .SecureChannel import SecureChannel
-    
+from .version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION, PYSATOCHIP_VERSION
+
+import hashlib
+import hmac
 import base64
 import logging 
 from os import urandom
-
 
 #debug
 import sys
@@ -49,14 +51,14 @@ class LogCardConnectionObserver(CardConnectionObserver):
                                         JCconstants.INS_BIP32_IMPORT_SEED, JCconstants.INS_BIP32_RESET_SEED,
                                         JCconstants.INS_CREATE_PIN, JCconstants.INS_VERIFY_PIN,
                                         JCconstants.INS_CHANGE_PIN, JCconstants.INS_UNBLOCK_PIN)):
-                logger.info(f"> {toHexString(ccevent.args[0][0:5])}{(len(ccevent.args[0])-5)*' *'}")
+                logger.debug(f"> {toHexString(ccevent.args[0][0:5])}{(len(ccevent.args[0])-5)*' *'}")
             else:
-                logger.info(f"> {toHexString(ccevent.args[0])}")
+                logger.debug(f"> {toHexString(ccevent.args[0])}")
         elif 'response'==ccevent.type:
             if []==ccevent.args[0]:
-                logger.info( f'< [] {toHexString(ccevent.args[-2:])}')
+                logger.debug( f'< [] {toHexString(ccevent.args[-2:])}')
             else:
-                logger.info( f'< {toHexString(ccevent.args[0])} {toHexString(ccevent.args[-2:])}')
+                logger.debug( f'< {toHexString(ccevent.args[0])} {toHexString(ccevent.args[-2:])}')
 
 # a card observer that detects inserted/removed cards and initiate connection
 class RemovalObserver(CardObserver):
@@ -91,7 +93,7 @@ class RemovalObserver(CardObserver):
                     self.cc.card_initiate_secure_channel()
                     
             except Exception as exc:
-                logger.info(f"Error during connection: {repr(exc)}")
+                logger.warning(f"Error during connection: {repr(exc)}")
             if self.cc.client:
                 self.cc.client.request('update_status',True)                
                 
@@ -111,10 +113,6 @@ class CardConnector:
     # v0.9: patch message signing for alts
     # v0.10: sign tx hash
     # v0.11: support for (mandatory) secure channel
-    SATOCHIP_PROTOCOL_MAJOR_VERSION=0
-    SATOCHIP_PROTOCOL_MINOR_VERSION=11
-    SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCOL_MINOR_VERSION
-    SATOCHIP_LIB_REVISION= 'a'
     
     # define the apdus used in this script
     BYTE_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
@@ -153,48 +151,6 @@ class CardConnector:
     ###########################################
     #                   Applet management                        #
     ###########################################
-    
-    # def card_transmit_old(self, plain_apdu):
-        # if self.card_present:
-            # try:
-                # #encrypt apdu
-                # ins= plain_apdu[1]
-                # if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                    # logger.info("Plaintext C-APDU: "+str(toHexString(plain_apdu))) #TODO: mask sensitive info
-                    # apdu = self.card_encrypt_secure_channel(plain_apdu)
-                # else:
-                    # apdu= plain_apdu
-                    
-                # # transmit apdu
-                # (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
-                
-                # #decrypt response
-                # if (sw1==0x90) and (sw2==0x00):
-                    # if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                        # response= self.card_decrypt_secure_channel(response)
-                        # logger.info("Plaintext R-APDU: "+str(toHexString(response)))
-                
-                # # PIN authentication is required
-                # if (sw1==0x9C) and (sw2==0x06):
-                    # (response, sw1, sw2)= self.card_verify_PIN()
-                    
-                    # #reencrypt apdu
-                    # if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                        # apdu = self.card_encrypt_secure_channel(plain_apdu)
-                    # else:
-                        # apdu= plain_apdu
-                    # (response, sw1, sw2)= self.cardservice.connection.transmit(apdu)
-                
-                # return (response, sw1, sw2)
-                
-            # except Exception as exc:
-                # logger.info(f"Error during connection:{repr(exc)} {traceback.format_exc()}")
-                # self.client.request('show_error',"Error during connection:"+repr(exc))
-                # return ([], 0x00, 0x00)
-        # else:
-            # self.client.request('show_error','No Satochip found! Please insert card!')
-            # return ([], 0x00, 0x00)
-            # #TODO return errror or throw exception?
 
     def card_transmit(self, plain_apdu):
         logger.debug("In card_transmit")
@@ -254,7 +210,7 @@ class CardConnector:
         return 16*sw1+sw2
 
     def card_select(self):
-        logger.debug("In card_select")#debug
+        logger.debug("In card_select")
         SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
         apdu = SELECT + CardConnector.BYTE_AID
         (response, sw1, sw2) = self.card_transmit(apdu)
@@ -265,7 +221,7 @@ class CardConnector:
         return (response, sw1, sw2)
 
     def card_get_status(self):
-        logger.debug("In card_get_status")#debug
+        logger.debug("In card_get_status")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_GET_STATUS
         p1= 0x00
@@ -304,8 +260,8 @@ class CardConnector:
             self.needs_secure_channel= d["needs_secure_channel"]= False
             
         else:
-            logger.warning(f"In card_get_status: unknown get-status() error! sw12={hex(sw1)} {hex(sw2)}")#debugSatochip
-            raise RuntimeError('Unknown get-status() error code:'+hex(sw1)+' '+hex(sw2))
+            logger.warning(f"[card_get_status] unknown get-status() error! sw12={hex(sw1)} {hex(sw2)}")
+            #raise RuntimeError('Unknown get-status() error code:'+hex(sw1)+' '+hex(sw2))
             
         return (response, sw1, sw2, d)
 
@@ -352,6 +308,8 @@ class CardConnector:
 
         # send apdu (contains sensitive data!)
         (response, sw1, sw2) = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2== 0x00):
+            self.set_pin(0, pin0) #cache PIN value
         return (response, sw1, sw2)
 
     ###########################################
@@ -366,14 +324,32 @@ class CardConnector:
         p2= 0x00
         lc= len(seed)
         apdu=[cla, ins, p1, p2, lc]+seed
-
+        
         # send apdu (contains sensitive data!)
         response, sw1, sw2 = self.card_transmit(apdu)
+        
         # compute authentikey pubkey and send to chip for future use
         authentikey= None
         if (sw1==0x90) and (sw2==0x00):
             authentikey= self.card_bip32_set_authentikey_pubkey(response)
+            authentikey_hex= authentikey.get_public_key_bytes(True).hex()
+            logger.debug('[card_bip32_import_seed] authentikey_card= ' + authentikey_hex)
+            
+            # compute authentikey locally from seed
+            # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', seed)
+            bytekey= bytes('Bitcoin seed2', 'utf8') #b'Bitcoin seed2'
+            byteseed= bytes(seed)
+            mac= hmac.new(bytekey, byteseed, hashlib.sha512).digest()[0:32]
+            priv= ECPrivkey(mac)
+            pub= priv.get_public_key_bytes(True)
+            pub_hex= pub.hex()
+            logger.debug('[card_bip32_import_seed] authentikey_local= ' + pub_hex)
+            
+            if (pub_hex != authentikey_hex):
+                raise RuntimeError('Authentikey mismatch: local value differs from card value!')
+                
             self.is_seeded= True
+            
         return authentikey
 
     def card_reset_seed(self, pin, hmac=[]):
@@ -433,6 +409,10 @@ class CardConnector:
         return authentikey
 
     def card_bip32_get_extendedkey(self, path):
+    
+        if (type(path)==str):
+            (depth, path)= self.parser.bip32path2bytes(path)
+    
         logger.debug("In card_bip32_get_extendedkey")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_BIP32_GET_EXTENDED_KEY
@@ -452,7 +432,7 @@ class CardConnector:
             # if there is no more memory available, erase cache...
             #if self.get_sw12(sw1,sw2)==JCconstants.SW_NO_MEMORY_LEFT:
             if (sw1==0x9C) and (sw2==0x01):
-                logger.info("card_bip32_get_extendedkey(): Reset memory...")#debugSatochip
+                logger.info("[card_bip32_get_extendedkey] Reset memory...")#debugSatochip
                 apdu[3]=apdu[3]^0x80
                 response, sw1, sw2 = self.card_transmit(apdu)
                 apdu[3]=apdu[3]&0x7f # reset the flag
@@ -461,7 +441,7 @@ class CardConnector:
                 raise UnexpectedSW12Error('Unexpected error code SW12='+hex(sw1)+" "+hex(sw2))
             # check for non-hardened child derivation optimization
             elif ( (response[32]&0x80)== 0x80):
-                logger.info("card_bip32_get_extendedkey(): Child Derivation optimization...")#debugSatochip
+                logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
                 (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
                 coordy= pubkey.get_public_key_bytes(compressed=False)
                 coordy= list(coordy[33:])
@@ -808,10 +788,8 @@ class CardConnector:
 
     def card_verify_PIN(self):
         logger.debug("In card_verify_PIN")
-        if not self.card_present:
-            self.client.request('show_error', 'No Satochip found! Please insert card!')
-            return
-        while (True):
+        
+        while (self.card_present):
             if self.pin is None:
                 # (response, sw1, sw2, d)=self.card_get_status() # get number of pin tries remaining
                 # if d.get("PIN0_remaining_tries",-1)==1:
@@ -855,7 +833,11 @@ class CardConnector:
                 msg = ("Too many failed attempts! Your Satochip has been blocked! You need your PUK code to unblock it.")
                 self.client.request('show_error', msg)
                 raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
-
+        
+        #if not self.card_present:
+        self.client.request('show_error', 'No Satochip found! Please insert card!')
+        return
+            
     def set_pin(self, pin_nbr, pin):
         self.pin_nbr=pin_nbr
         self.pin=pin
@@ -940,129 +922,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         self.set_pin(0, None)
         return (response, sw1, sw2)
-    
-    #####################
-    
-    def card_init_connect(self):
-        logger.debug("In card_init_connect")
-        logger.info("ATR: "+str(self.card_get_ATR()))
-        #response, sw1, sw2 = self.card_select() #TODO: remove?
         
-        # check setup
-        while(self.card_present):
-            (response, sw1, sw2, d)=self.card_get_status()
-            
-            # check version
-            if  (self.setup_done):
-                v_supported= CardConnector.SATOCHIP_PROTOCOL_VERSION 
-                v_applet= d["protocol_version"] 
-                logger.info(f"In card_init_connect(): Satochip version={hex(v_applet)} Electrum supported version= {hex(v_supported)}")#debugSatochip
-                if (v_supported<v_applet):
-                    msg=(_('The version of your Satochip is higher than supported by Electrum. You should update Electrum to ensure correct functioning!')+ '\n' 
-                                + f'    Satochip version: {d["protocol_major_version"]}.{d["protocol_minor_version"]}' + '\n' 
-                                + f'    Supported version: {CardConnector.SATOCHIP_PROTOCOL_MAJOR_VERSION}.{CardConnector.SATOCHIP_PROTOCOL_MINOR_VERSION}')
-                    self.client.request('show_error', msg)
-                
-                if (self.needs_secure_channel):
-                    self.card_initiate_secure_channel()
-                
-                break 
-                
-            # setup device (done only once)
-            else:
-                # PIN dialog
-                msg = _("Enter a new PIN for your Satochip:")
-                msg_confirm = _("Please confirm the PIN code for your Satochip:")
-                msg_error = _("The PIN values do not match! Please type PIN again!")
-                (is_PIN, pin_0)= self.client.PIN_setup_dialog(msg, msg_confirm, msg_error)
-                
-                pin_0= list(pin_0)
-                self.set_pin(0, pin_0) #cache PIN value in client
-                pin_tries_0= 0x05;
-                ublk_tries_0= 0x01;
-                # PUK code can be used when PIN is unknown and the card is locked
-                # We use a random value as the PUK is not used currently and is not user friendly
-                ublk_0= list(urandom(16)); 
-                pin_tries_1= 0x01
-                ublk_tries_1= 0x01
-                pin_1= list(urandom(16)); #the second pin is not used currently
-                ublk_1= list(urandom(16));
-                secmemsize= 32 # number of slot reserved in memory cache
-                memsize= 0x0000 # RFU
-                create_object_ACL= 0x01 # RFU
-                create_key_ACL= 0x01 # RFU
-                create_pin_ACL= 0x01 # RFU
-                
-                #setup
-                (response, sw1, sw2)=self.card_setup(pin_tries_0, ublk_tries_0, pin_0, ublk_0,
-                        pin_tries_1, ublk_tries_1, pin_1, ublk_1, 
-                        secmemsize, memsize, 
-                        create_object_ACL, create_key_ACL, create_pin_ACL)
-                if sw1!=0x90 or sw2!=0x00:       
-                    logger.info(f"In card_init_connect(): unable to set up applet!  sw12={hex(sw1)} {hex(sw2)}")#debugSatochip
-                    raise RuntimeError('Unable to setup the device with error code:'+hex(sw1)+' '+hex(sw2))
-            
-        # verify pin:
-        try:
-            self.card_verify_PIN()
-        except Exception as exc:
-            self.client.request('show_error', repr(exc))
-            return
-        
-        # get authentikey
-        try:
-            authentikey=self.card_bip32_get_authentikey()
-        except UninitializedSeedError:
-            # Option: setup 2-Factor-Authentication (2FA)
-            self.init_2FA()
-                    
-            # seed dialog...
-            logger.info("In card_init_connect(): import seed...") #debugSatochip
-            (mnemonic, passphrase, seed)= self.client.seed_wizard()                    
-            if seed:
-                seed= list(seed)
-                authentikey= self.card_bip32_import_seed(seed)
-                if authentikey:
-                    self.client.request('show_success','Seed successfully imported to Satochip!')
-                else:
-                    self.client.request('show_error','Error when importing seed to Satochip!')
-            else: #if cancel
-                self.client.request('show_message','Seed import cancelled!')
-                
-        hex_authentikey= authentikey.get_public_key_hex(compressed=True)
-        logger.info(f"In card_init_connect(): authentikey={hex_authentikey}")#debugSatochip       
-        
-    def init_2FA(self):
-        logger.debug("In init_2FA")
-        if not self.needs_2FA:
-            use_2FA=self.client.request('yes_no_question', MSG_USE_2FA)
-            if (use_2FA):
-                secret_2FA= urandom(20)
-                secret_2FA_hex=secret_2FA.hex()
-                amount_limit= 0 # i.e. always use 
-                try:
-                    # the secret must be shared with the second factor app (eg on a smartphone)
-                    msg= 'Scan this QR code on your second device \nand securely save a backup of this 2FA-secret: \n'+secret_2FA_hex
-                    (event, values)= self.client.request('QRDialog', secret_2FA_hex, None, "Satochip-Bridge: QR Code", True, msg)
-                    if event=='Ok':
-                        # further communications will require an id and an encryption key (for privacy). 
-                        # Both are derived from the secret_2FA using a one-way function inside the Satochip
-                        (response, sw1, sw2)=self.card_set_2FA_key(secret_2FA, amount_limit)
-                        if sw1!=0x90 or sw2!=0x00:                 
-                            logger.warning("In init_2FA(): unable to set 2FA!  sw12="+hex(sw1)+" "+hex(sw2))#debugSatochip
-                            self.client.request('show_error', 'Unable to setup 2FA with error code:'+hex(sw1)+' '+hex(sw2))
-                            #raise RuntimeError('Unable to setup 2FA with error code:'+hex(sw1)+' '+hex(sw2))
-                        else:
-                            self.needs_2FA=True
-                            self.client.request('show_success', '2FA enabled successfully!')
-                    else: # Cancel
-                        self.client.request('show_message', '2FA activation canceled!')
-                except Exception as e:
-                    logger.warning("In init_2FA(): exception during 2FA activation: "+str(e))    
-                    self.client.request('show_error', 'Exception during 2FA activation: '+str(e))
-        else:
-            self.client.request('show_message', '2FA is already activated!')
-    
     ###########################################
     #                         Secure Channel                        #
     ###########################################
@@ -1102,9 +962,9 @@ class CardConnector:
                                 JCconstants.INS_BIP32_IMPORT_SEED, JCconstants.INS_BIP32_RESET_SEED,
                                 JCconstants.INS_CREATE_PIN, JCconstants.INS_VERIFY_PIN,
                                 JCconstants.INS_CHANGE_PIN, JCconstants.INS_UNBLOCK_PIN)):
-            logger.info(f"Plaintext C-APDU: {toHexString(apdu[0:5])}{(len(apdu)-5)*' *'}")
+            logger.debug(f"Plaintext C-APDU: {toHexString(apdu[0:5])}{(len(apdu)-5)*' *'}")
         else:
-            logger.info(f"Plaintext C-APDU: {toHexString(apdu)}")
+            logger.debug(f"Plaintext C-APDU: {toHexString(apdu)}")
             
         # for encryption, the data is padded with PKCS#7
         blocksize= 16
@@ -1145,7 +1005,7 @@ class CardConnector:
         #logger.debug(f'Plaintext without padding: {toHexString(plaintext)}')
         
         #log response
-        logger.info( f'Plaintext R-APDU: {toHexString(plaintext)}')
+        logger.debug( f'Plaintext R-APDU: {toHexString(plaintext)}')
         
         return plaintext
     

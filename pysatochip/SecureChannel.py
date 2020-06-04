@@ -44,7 +44,7 @@ class SecureChannel:
         self.sc_IVcounter= 1
         self.shared_key = self.sc_privkey.exchange(ec.ECDH(), self.sc_peer_pubkey)
         
-        logger.debug("Shared key:"+ self.shared_key.hex()) #debug
+        # logger.debug("Shared key:"+ self.shared_key.hex()) #debug
         
         mac = hmac.new(self.shared_key, "sc_key".encode('utf-8'), sha1)
         self.derived_key= mac.digest()[:16]
@@ -56,7 +56,9 @@ class SecureChannel:
         # tmp_key= sha256(tmp_key).digest()
         # self.mac_key= tmp_key[:20]
         
-        logger.debug("Derived_key key:"+ self.derived_key.hex()) #debug
+        # logger.debug("Derived_key key:"+ self.derived_key.hex()) #debug
+        # logger.debug("Mac_key key:"+ self.mac_key.hex()) #debug
+        
         self.initialized_secure_channel= True
             
     def encrypt_secure_channel(self, data_bytes):

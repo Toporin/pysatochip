@@ -12,7 +12,7 @@ The Pysatochip library allows to integrate the Satochip Hardware Wallet with a c
 The Satochip wallet is currently in Beta, use with caution! In this phase, it is strongly recommended to use the software on the Bitcoin testnet first.
 This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
 
-Rem: Pysatochip uses Python 3.x. In case of error, check first that you are not trying to run with Python 2.x or with Python 2.x libraries.
+Remark: Pysatochip uses Python 3.x. In case of error, check first that you are not trying to run with Python 2.x or with Python 2.x libraries.
 
     
 ### Satochip 2-Factor-Authentication (2FA)
@@ -39,10 +39,6 @@ Download the .whl files from https://sourceforge.net/projects/pyscard/files/pysc
     python -m pip install pyscard-1.9.7-cp36-cp36m-win_amd64.whl
 
 ## Development version (Ubuntu)
-
-(Electrum requires Python 3.6, which should be installed by default on Ubuntu)
-(If necessary, install pip: sudo apt-get install python3-pip)
-
 
 Check out the code from GitHub::
     
