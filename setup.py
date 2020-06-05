@@ -4,6 +4,9 @@ import importlib.util
 with open("readme.md", "r") as fh:
     long_description = fh.read()
 
+with open('requirements.txt') as f:
+    requirements = f.read().splitlines()
+
 # load version.py; needlessly complicated alternative to "imp.load_source":
 version_spec = importlib.util.spec_from_file_location('version', 'pysatochip/version.py')
 version_module = version = importlib.util.module_from_spec(version_spec)
@@ -27,7 +30,7 @@ setuptools.setup(
         'Tracker': 'https://github.com/Toporin/pysatochip/issues',
     },
     packages=setuptools.find_packages(),
-    install_requires=['pyscard', 'ecdsa', 'cryptography'],
+    install_requires=requirements,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
