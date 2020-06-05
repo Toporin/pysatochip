@@ -33,11 +33,6 @@ from ecdsa.curves import SECP256k1
 from ecdsa.ellipticcurve import Point
 from ecdsa.util import string_to_number, number_to_string
 
-#from electroncash.util import bfh, bh2u, assert_bytes, print_error, to_bytes, InvalidPassword, profiler
-#from electroncash.bitcoin import (Hash, aes_encrypt_with_iv, aes_decrypt_with_iv, hmac_oneshot)
-#from electroncash.ecc_fast import do_monkey_patching_of_python_ecdsa_internals_with_libsecp256k1
-#from electroncash import msqr
-
 from .util import sha256d, to_bytes, assert_bytes, bh2u, bfh, var_int
 
 # do_monkey_patching_of_python_ecdsa_internals_with_libsecp256k1()

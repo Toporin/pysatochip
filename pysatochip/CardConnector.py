@@ -966,12 +966,6 @@ class CardConnector:
         else:
             logger.debug(f"Plaintext C-APDU: {toHexString(apdu)}")
             
-        # for encryption, the data is padded with PKCS#7
-        blocksize= 16
-        size=len(apdu)
-        padsize= blocksize - (size%blocksize)
-        apdu= apdu+ [padsize]*padsize
-        
         (iv, ciphertext, mac)= self.sc.encrypt_secure_channel(bytes(apdu))
         data= list(iv) + [len(ciphertext)>>8, len(ciphertext)&0xff] + list(ciphertext) + [len(mac)>>8, len(mac)&0xff] + list(mac)
         lc= len(data)
@@ -996,13 +990,6 @@ class CardConnector:
             raise RuntimeError('Ciphertext has wrong lenght!')
             
         plaintext= self.sc.decrypt_secure_channel(iv, ciphertext)
-        
-        #remove padding
-        #logger.debug(f'Plaintext with padding: {toHexString(plaintext)}')
-        plaintext= list(plaintext)
-        pad= plaintext[-1]
-        plaintext=plaintext[0:-pad]
-        #logger.debug(f'Plaintext without padding: {toHexString(plaintext)}')
         
         #log response
         logger.debug( f'Plaintext R-APDU: {toHexString(plaintext)}')
