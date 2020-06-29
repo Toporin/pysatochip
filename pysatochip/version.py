@@ -14,5 +14,6 @@ SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCO
 # v0.11.a: initial version
 # v0.11.1: new versioning, minor changes
 # v0.11.2: use ecdsa & pyaes libraries instead of cryptography for ecdh key exchange
-PYSATOCHIP_REVISION= 2
+# v0.11.3: add support for altcoin message signing in CardConnector.card_sign_message()
+PYSATOCHIP_REVISION= 3
 PYSATOCHIP_VERSION= str(SATOCHIP_PROTOCOL_MAJOR_VERSION) + '.' + str(SATOCHIP_PROTOCOL_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

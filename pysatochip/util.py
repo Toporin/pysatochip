@@ -71,9 +71,13 @@ def int_to_hex(i, length=1):
     s = "0"*(2*length - len(s)) + s
     return rev_hex(s)
 
-
-
-
-
-
+def msg_magic(message: bytes, altcoin=None) -> bytes:
+    length = bfh(var_int(len(message)))
+    if altcoin is None:
+        return b"\x18Bitcoin Signed Message:\n" + length + message
+    else:
+        message_prefix= to_bytes(altcoin) + to_bytes(" Signed Message:\n", "utf8")
+        length_prefix= bfh(var_int(len(message_prefix)))
+        message_full= length_prefix + message_prefix + length + message
+        return message_full
 

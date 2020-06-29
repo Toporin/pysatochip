@@ -21,8 +21,7 @@ import logging
 from hashlib import sha256
 from struct import pack, unpack
 
-from .util import sha256d, to_bytes
-from .ecc import ECPubkey, msg_magic, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
+from .ecc import ECPubkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -158,11 +157,12 @@ class CardDataParser:
             return (self.pubkey)
     
     ##############
-    def parse_message_signature(self, response, message, pubkey):
+    def parse_message_signature(self, response, hash, pubkey):
         logger.debug("In parse_message_signature")
         # Prepend the message for signing as done inside the card!!
-        message = to_bytes(message, 'utf8')
-        hash = sha256d(msg_magic(message))
+        #message = to_bytes(message, 'utf8')
+        #hash = sha256d(msg_magic(message))
+
         coordx= pubkey.get_public_key_bytes()
         
         response= bytearray(response)

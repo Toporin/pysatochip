@@ -9,8 +9,9 @@ from smartcard.sw.SWExceptions import SWException
 from .JCconstants import JCconstants
 from .CardDataParser import CardDataParser
 from .TxParser import TxParser
-from .ecc import ECPubkey, ECPrivkey, msg_magic
+from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
+from .util import msg_magic, sha256d
 from .version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION, PYSATOCHIP_VERSION
 
 import hashlib
@@ -460,11 +461,13 @@ class CardConnector:
     #                      Signing commands                      #
     ###########################################
     
-    def card_sign_message(self, keynbr, pubkey, message, hmac=b''):
+    def card_sign_message(self, keynbr, pubkey, message, hmac=b'', altcoin=None):
         logger.debug("In card_sign_message")
         if (type(message)==str):
             message = message.encode('utf8')
-
+        if (type(altcoin)==str):
+            altcoin = altcoin.encode('utf8')
+            
         # return signature as byte array
         # data is cut into chunks, each processed in a different APDU call
         chunk= 128 # max APDU data=255 => chunk<=255-(4+2)
@@ -476,11 +479,14 @@ class CardConnector:
         ins= JCconstants.INS_SIGN_MESSAGE
         p1= keynbr # 0xff=>BIP32 otherwise STD
         p2= JCconstants.OP_INIT
-        lc= 0x4
+        lc= 0x4  if not altcoin else (0x4+0x1+len(altcoin))
         apdu=[cla, ins, p1, p2, lc]
         for i in reversed(range(4)):
             apdu+= [((buffer_left>>(8*i)) & 0xff)]
-
+        if altcoin:
+	            apdu+= [len(altcoin)]
+	            apdu+=altcoin 
+                
         # send apdu
         (response, sw1, sw2) = self.card_transmit(apdu)
 
@@ -519,7 +525,9 @@ class CardConnector:
             logger.warning("In card_sign_message(): error sw12="+hex(sw1)+" "+hex(sw2))#debugSatochip
             compsig=b''
         else:
-            compsig=self.parser.parse_message_signature(response, message, pubkey)
+            # Prepend the message for signing as done inside the card!!
+            hash = sha256d(msg_magic(message, altcoin))
+            compsig=self.parser.parse_message_signature(response, hash, pubkey)
                 
         return (response, sw1, sw2, compsig)
 
