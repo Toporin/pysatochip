@@ -27,9 +27,9 @@ import traceback
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
+MSG_WARNING= ("Before you request coins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
-                    "its seed (and passphrase, if any).  Otherwise all bitcoins you "
+                    "its seed (and passphrase, if any).  Otherwise all coins you "
                     "receive will be unspendable.")
                     
 MSG_USE_2FA= ("Do you want to use 2-Factor-Authentication (2FA)?\n\n"
@@ -841,7 +841,13 @@ class CardConnector:
                 msg = ("Too many failed attempts! Your Satochip has been blocked! You need your PUK code to unblock it.")
                 self.client.request('show_error', msg)
                 raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
-        
+            # any other edge case
+            else:
+                self.set_pin(0, None) #reset cached PIN value
+                msg = (f"Please check your card! \nUnexpected error sw12: {hex(sw1)} {hex(sw2)}")
+                self.client.request('show_error', msg)
+                return (response, sw1, sw2)     
+                
         #if not self.card_present:
         self.client.request('show_error', 'No Satochip found! Please insert card!')
         return
