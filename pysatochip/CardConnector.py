@@ -90,6 +90,7 @@ class RemovalObserver(CardObserver):
                 if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                     self.cc.card_disconnect()
                     break
+                # TODO: also done in card_select() => remove one?
                 if (self.cc.needs_secure_channel):
                     self.cc.card_initiate_secure_channel()
                     
@@ -116,7 +117,8 @@ class CardConnector:
     # v0.11: support for (mandatory) secure channel
     
     # define the apdus used in this script
-    BYTE_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
+    SATOCHIP_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
+    SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SatoChip
 
     def __init__(self, client=None, loglevel= logging.WARNING):
         logger.setLevel(loglevel)
@@ -135,6 +137,8 @@ class CardConnector:
         # cache PIN
         self.pin_nbr=None
         self.pin=None
+        # SeedKeeper or Satochip?
+        self.card_type= None
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
         try:
@@ -213,12 +217,23 @@ class CardConnector:
     def card_select(self):
         logger.debug("In card_select")
         SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
-        apdu = SELECT + CardConnector.BYTE_AID
+        apdu = SELECT + CardConnector.SATOCHIP_AID
         (response, sw1, sw2) = self.card_transmit(apdu)
         
+        if sw1==0x90 and sw2==0x00:
+            self.card_type="Satochip"
+        else:
+            SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
+            apdu = SELECT + CardConnector.SEEDKEEPER_AID
+            (response, sw1, sw2) = self.card_transmit(apdu)
+            if sw1==0x90 and sw2==0x00:
+                self.card_type="SeedKeeper"
+        
+        # TODO: also done in RemovalObserver.update() => remove one
         #reset secure channel if needed
-        if (self.needs_secure_channel): 
-            self.card_initiate_secure_channel()
+        # if (self.needs_secure_channel): 
+            # logger.debug("In card_select: card_initiate_secure_channel")
+            # self.card_initiate_secure_channel()
         return (response, sw1, sw2)
 
     def card_get_status(self):
@@ -700,8 +715,7 @@ class CardConnector:
             id_2FA= response[16:36]
             msg_out=IV
             # id_2FA is 20 bytes, should be 32 => use sha256
-            from hashlib import sha256
-            id_2FA= sha256(bytes(id_2FA)).hexdigest()
+            id_2FA= hashlib.sha256(bytes(id_2FA)).hexdigest()
         else:
             p1= 0x01
             lc= 0x10
@@ -1009,7 +1023,194 @@ class CardConnector:
         logger.debug( f'Plaintext R-APDU: {toHexString(plaintext)}')
         
         return plaintext
+        
+                                #################################
+                                #                  SEEDKEEPER              #        
+                                #################################                               
+        
+    def seedkeeper_generate_masterseed(self, seed_size, export_rights, label:str):
+        logger.debug("In seedkeeper_generate_masterseed")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA0
+        p1= seed_size
+        p2= export_rights
+        
+        label= list(label.encode('utf-8'))
+        label_size= len(label)
+        data= [label_size]+label
+        
+        lc= len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # send apdu (contains sensitive data!)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            id= (response[0]<<8)+response[1]
+            logger.debug(f"Masterseed generated successfully with id: {id}")
+        else:
+            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            id=None
+            
+        return (response, sw1, sw2, id)
     
+    def seedkeeper_import_plain_secret(self, secret_type, export_rights, label, secret):
+        logger.debug("In seedkeeper_import_plain_secret")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA1
+        p1= 0x00
+        
+        # OP_INIT
+        p2= 0x01
+        label_list= list( label.encode('utf-8') )
+        label_size= len(label_list)
+        
+        data= [secret_type, export_rights, label_size] + label_list
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1!=0x90 or sw2!=0x00):
+            logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
+            return -1
+            
+        # OP_PROCESS
+        p2= 0x02
+        chunk_size=128;
+        if type(secret)==str:
+            try:
+                secret_list= list(bytes.fromhex(secret)) #hex
+            except ValueError as e:
+                secret_list= list(secret.encode('utf-8'))
+        elif type(secret)==bytes:
+            secret_list= list(secret)
+        elif type(secret)==list:
+            secret_list= (secret)
+        else:
+            raise Exception("Unsupported format for secret")
+        logger.debug("Secret_list: ", secret_list)
+        
+        secret_offset= 0
+        secret_remaining= len(secret_list)
+        while (secret_remaining>chunk_size):
+            data= [(chunk_size>>8), (chunk_size%256)] + secret_list[secret_offset:(secret_offset+chunk_size)]
+            lc=len(data)
+            apdu=[cla, ins, p1, p2, lc]+data
+            response, sw1, sw2 = self.card_transmit(apdu)
+            if (sw1!=0x90 or sw2!=0x00):
+                logger.error(f"Error during secret import - OP_PROCESS: {(sw1*256+sw2):0>4X}")
+                return -1
+            secret_offset+=chunk_size
+            secret_remaining-=chunk_size
+        
+        # OP_FINAL
+        p2= 0x03
+        data= [(secret_remaining>>8), (secret_remaining%256)] + secret_list[secret_offset:(secret_offset+secret_remaining)]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1!=0x90 or sw2!=0x00):
+            logger.error(f"Error during secret import - OP_FINAL: {(sw1*256+sw2):0>4X}")
+            return -1
+        secret_offset+=chunk_size
+        secret_remaining=0
+        
+        # check fingerprint
+        id= response[0]*256+response[1]
+        fingerprint_list= response[2:6]
+        fingerprint_from_seedkeeper= bytes(fingerprint_list).hex()
+        fingerprint_from_secret= hashlib.sha256(bytes(secret_list)).hexdigest()[0:8]
+        if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
+            logger.debug("Fingerprints match !")
+        else:
+            logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
+         
+        return id, fingerprint_from_seedkeeper
+    
+    def seedkeeper_export_plain_secret(self, id):
+        logger.debug("In seedkeeper_export_plain_secret")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA2
+        p1= 0x00
+        p2= 0x00
+        
+        data= [(id>>8)%256, id%256]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # initial call
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x9c and sw2==0x31):
+            logger.warning("Export failed: export not allowed by SeedKeeper policy.")
+            return None
+        # parse header
+        secret_dict= self.parser.parse_seedkeeper_header(response)
+                
+        secret=[]
+        while(True):
+            
+            response, sw1, sw2 = self.card_transmit(apdu)
+            # parse data
+            response_size= len(response)
+            chunk_size= (response[0]<<8)+response[1]
+            chunk= response[2:(2+chunk_size)]
+            secret+= chunk
+            
+            # check if last chunk
+            if (chunk_size+2<response_size):
+                offset= chunk_size+2
+                sign_size=  (response[offset]<<8)+response[offset+1]
+                offset+=2
+                sign= response[offset:(offset+sign_size)]
+                
+                # check signature
+                full_data=secret_dict['header']+secret
+                self.parser.verify_signature(full_data, sign, self.parser.authentikey)
+                secret_dict['sign']=sign
+                secret_dict['full_data']= full_data
+                break
+        secret_dict['secret']= secret
+        secret_dict['secret_hex']= bytes(secret).hex()
+        logger.debug(f"Secret: {secret_dict['secret_hex']}")
+        
+        # check fingerprint
+        secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
+        if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
+            logger.debug("Fingerprints match !")
+        else:
+            logger.error(f"Fingerprint mismatch: expected {fingerprint} but recovered {secret_dict['fingerprint_from_secret']} ")
+            
+        return secret_dict
+    
+    def seedkeeper_list_secret_headers(self):
+        logger.debug("In seedkeeper_list_secret_headers")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA6
+        p1= 0x00
+        
+        # init
+        p2= 0x01
+        apdu=[cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        
+        while (sw1==0x90 and sw2==0x00):
+            secret_dict= self.parser.parse_seedkeeper_header(response)
+            
+            #todo: verif signature
+            
+            # next object
+            p2= 0x02
+            apdu=[cla, ins, p1, p2]
+            response, sw1, sw2 = self.card_transmit(apdu)
+        
+        if (sw1==0x9C and sw2==0x12):
+            logger.debug(f"No more object in memory")
+        else:
+            logger.warning(f"Error during object listing: {sw1} {sw2}")
+            
+        return
+
+
+
+
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""
     pass

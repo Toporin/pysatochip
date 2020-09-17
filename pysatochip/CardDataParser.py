@@ -295,8 +295,39 @@ class CardDataParser:
 
         if recid == -1:
             raise ValueError("Unable to recover public key from signature")
-
+        
+        logger.debug("Signature verified!")
         return pubkey
+
+    #######
+    def verify_signature(self, data, sig, authentikey):
+        logger.debug("In verify_signature")
+        data= bytearray(data)
+        sig= bytearray(sig)
+
+        digest= sha256()
+        digest.update(data)
+        hash=digest.digest()
+
+        recid=-1
+        for id in range(4):
+            compsig=self.parse_to_compact_sig(sig, id, compressed=True)
+            # remove header byte
+            compsig= compsig[1:]
+
+            try:
+                pk = ECPubkey.from_sig_string(compsig, id, hash)
+            except InvalidECPointException:
+                continue
+            
+            if pk== authentikey:
+                recid=id
+                break
+            
+        if recid == -1:
+            raise ValueError("Unable to recover authentikey from signature")
+
+        return pk
 
     ##############
     def parse_parse_transaction(self, response):
@@ -386,5 +417,48 @@ class CardDataParser:
         # v= compsig[0]-27 if (compsig[0]<=28)  else compsig[0]-27-4 # recid is 0 or 1
         # return (r,s,v)
     
+    def parse_seedkeeper_header(self, response):
+        # parse header
+        
+        header_dict={}
+        if ( len(response) <12 ):
+            logger.error(f"SeedKeeper error: header response too short: {len(response)}")
+            return header_dict
+        
+        header_dict['id']= (response[0]<<8) +response[1]
+        header_dict['type']= response[2]
+        header_dict['export_rights']= response[3]
+        header_dict['export_nbplain']=  response[4]
+        header_dict['export_nbsecure']=  response[5]
+        header_dict['export_counter']=  response[6]
+        header_dict['fingerprint_list']= response[7:11]
+        header_dict['fingerprint']= bytes(header_dict['fingerprint_list']).hex()
+        header_dict['label_size']= response[11]
+        if ( len(response) <(12+header_dict['label_size'])):
+            logger.error(f"SeedKeeper error: header response too short: {len(response)}")
+            return header_dict
+            
+        header_dict['label_list']= response[12:(12+header_dict['label_size'])]
+        try:
+            header_dict['label']=  bytes(header_dict['label_list']).decode("utf-8") 
+        except UnicodeDecodeError as e:
+            logger.warning("UnicodeDecodeError while decoding label header!")
+            header_dict['label']=  str(bytes(header_dict['label_list']))
+        header_dict['header']=  response[0:(12+header_dict['label_size'])]
+        
+        logger.debug(f"++++++++++++++++++++++++++++++++")
+        logger.debug(f"Secret id: {header_dict['id']}")
+        logger.debug(f"Secret type: {header_dict['type']}")
+        logger.debug(f"Secret export_rights: {header_dict['export_rights']}")
+        logger.debug(f"Secret export_nbplain: {header_dict['export_nbplain']}")
+        logger.debug(f"Secret export_nbsecure: {header_dict['export_nbsecure']}")
+        logger.debug(f"Secret export_counter: {header_dict['export_counter']}")
+        logger.debug(f"Secret fingerprint: {header_dict['fingerprint']}")
+        logger.debug(f"Secret label: {header_dict['label']}")
+        logger.debug(f"Secret label_list: {header_dict['label_list']}")
+        logger.debug(f"++++++++++++++++++++++++++++++++")
+                    
+        return header_dict
     
+        
     
