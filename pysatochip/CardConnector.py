@@ -1047,11 +1047,13 @@ class CardConnector:
         if (sw1==0x90) and (sw2==0x00):
             id= (response[0]<<8)+response[1]
             logger.debug(f"Masterseed generated successfully with id: {id}")
+            fingerprint_list= response[2:2+4]
+            fingerprint= bytes(fingerprint_list).hex()
         else:
             logger.error(f"Error during masterseed generation: {sw1} {sw2}")
             id=None
             
-        return (response, sw1, sw2, id)
+        return (response, sw1, sw2, id, fingerprint)
     
     def seedkeeper_import_plain_secret(self, secret_type, export_rights, label, secret):
         logger.debug("In seedkeeper_import_plain_secret")
@@ -1086,7 +1088,6 @@ class CardConnector:
             secret_list= (secret)
         else:
             raise Exception("Unsupported format for secret")
-        logger.debug("Secret_list: ", secret_list)
         
         secret_offset= 0
         secret_remaining= len(secret_list)
@@ -1200,6 +1201,8 @@ class CardConnector:
             p2= 0x02
             apdu=[cla, ins, p1, p2]
             response, sw1, sw2 = self.card_transmit(apdu)
+            
+            #TODO: create array of dicts
         
         if (sw1==0x9C and sw2==0x12):
             logger.debug(f"No more object in memory")
@@ -1208,7 +1211,69 @@ class CardConnector:
             
         return
 
+####
+    def seedkeeper_print_logs(self, print_all=True):
+        logger.debug("In seedkeeper_print_logs")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA9
+        p1= 0x00
+        
+        # init
+        p2= 0x01
+        apdu=[cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        
+        # first log
+        logs=[]
+        log_size=7;
+        if (sw1==0x90 and sw2==0x00):
+            nbtotal_logs= response[0]*256+response[1]
+            nbavail_logs= response[2]*256+response[3]
+            logger.debug("nbtotal_logs: "+ str(nbtotal_logs))
+            logger.debug("nbavail_logs: "+ str(nbavail_logs))
+            if len(response)>=4+log_size:
+                (opins, id1, id2, res)= self.parser.parse_seedkeeper_log(response[4:4+log_size])
+                logs=logs+[[opins, id1, id2, res]]
+                logger.debug("Latest log: "+ str(logs[0]))
+            else:
+                logger.debug("No logs available!")           
+            
+        #next logs
+        p2= 0x02
+        apdu=[cla, ins, p1, p2]
+        counter=0
+        while (print_all and sw1==0x90 and sw2==0x00):
+            
+            response, sw1, sw2 = self.card_transmit(apdu)
+            if (len(response)==0):
+                break
+                
+            while (len(response)>=log_size):
+                (opins, id1, id2, res)= self.parser.parse_seedkeeper_log(response[0:log_size])
+                logger.debug("Next log: "+ str([opins, id1, id2, res]))
+                logs=logs+[[opins, id1, id2, res]]
+                response= response[log_size:]
+            
+            counter+=1
+            if (counter>100): # safe break; should never happen
+                logger.warning(f"Counter exceeded during log printing: {counter}")
+                break
+            
+        if (sw1!=0x90 or sw2!=0x00):
+            logger.warning(f"Error during log printing: {sw1} {sw2}")
+        
+        #DEBUG
+        logger.warning(f"LOGS size: {len(logs)}")
+        i=0
+        for log in logs:
+            (opins, id1, id2, res)= log
+            logger.warning(f"index: {i} | {hex(opins)} {id1} {id2} {hex(res)}")
+            i+=1
+            
+        
+        return (logs, nbtotal_logs, nbavail_logs)
 
+####
 
 
 class AuthenticationError(Exception):

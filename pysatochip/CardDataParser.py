@@ -460,5 +460,20 @@ class CardDataParser:
                     
         return header_dict
     
+    def parse_seedkeeper_log(self, log):
+        
+        # todo: 
+        LOG_SIZE=7
+        if (len(log)<LOG_SIZE):
+            logger.error(f"Log record has the wrong lenght {len(log)}, should be {LOG_SIZE}")
+            raise Exception(f"Log record has the wrong lenght {len(log)}, should be {LOG_SIZE}")
+        
+        ins= log[0]
+        id1= log[1]*256+ log[2]
+        id2= log[3]*256+ log[4]
+        res= log[5]*256+ log[6]
+        
+        return (ins, id1, id2, res)
+        
         
     
