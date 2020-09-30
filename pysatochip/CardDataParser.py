@@ -427,24 +427,26 @@ class CardDataParser:
         
         header_dict['id']= (response[0]<<8) +response[1]
         header_dict['type']= response[2]
-        header_dict['export_rights']= response[3]
-        header_dict['export_nbplain']=  response[4]
-        header_dict['export_nbsecure']=  response[5]
-        header_dict['export_counter']=  response[6]
-        header_dict['fingerprint_list']= response[7:11]
+        header_dict['origin']= response[3]
+        
+        header_dict['export_rights']= response[4]
+        header_dict['export_nbplain']=  response[5]
+        header_dict['export_nbsecure']=  response[6]
+        header_dict['export_counter']=  response[7]
+        header_dict['fingerprint_list']= response[8:12]
         header_dict['fingerprint']= bytes(header_dict['fingerprint_list']).hex()
-        header_dict['label_size']= response[11]
-        if ( len(response) <(12+header_dict['label_size'])):
+        header_dict['label_size']= response[12]
+        if ( len(response) <(13+header_dict['label_size'])):
             logger.error(f"SeedKeeper error: header response too short: {len(response)}")
             return header_dict
             
-        header_dict['label_list']= response[12:(12+header_dict['label_size'])]
+        header_dict['label_list']= response[13:(13+header_dict['label_size'])]
         try:
             header_dict['label']=  bytes(header_dict['label_list']).decode("utf-8") 
         except UnicodeDecodeError as e:
             logger.warning("UnicodeDecodeError while decoding label header!")
             header_dict['label']=  str(bytes(header_dict['label_list']))
-        header_dict['header']=  response[0:(12+header_dict['label_size'])]
+        header_dict['header']=  response[0:(13+header_dict['label_size'])]
         
         logger.debug(f"++++++++++++++++++++++++++++++++")
         logger.debug(f"Secret id: {header_dict['id']}")
