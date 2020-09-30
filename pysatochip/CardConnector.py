@@ -185,6 +185,7 @@ class CardConnector:
             except Exception as exc:
                 logger.warning(f"Error during connection: {repr(exc)}")
                 self.client.request('show_error',"Error during connection:"+repr(exc))
+                traceback.print_exc() #debug
                 return ([], 0x00, 0x00)
         
         # no card present
@@ -1052,6 +1053,7 @@ class CardConnector:
         else:
             logger.error(f"Error during masterseed generation: {sw1} {sw2}")
             id=None
+            fingerprint= None
             
         return (response, sw1, sw2, id, fingerprint)
     
@@ -1069,6 +1071,7 @@ class CardConnector:
         data= [secret_type, export_rights, label_size] + label_list
         lc=len(data)
         apdu=[cla, ins, p1, p2, lc]+data
+        logger.debug(str(apdu)) #debug
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1!=0x90 or sw2!=0x00):
             logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
@@ -1131,7 +1134,7 @@ class CardConnector:
         cla= JCconstants.CardEdge_CLA
         ins= 0xA2
         p1= 0x00
-        p2= 0x00
+        p2= 0x01
         
         data= [(id>>8)%256, id%256]
         lc=len(data)
@@ -1141,11 +1144,24 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1==0x9c and sw2==0x31):
             logger.warning("Export failed: export not allowed by SeedKeeper policy.")
-            return None
+            raise SeedKeeperExportNotAllowedError("Export failed: export not allowed by SeedKeeper policy.")
+        if (sw1==0x9c and sw2==0x08):
+            logger.warning("Export failed: secret not found")
+            raise SeedKeeperObjectNotFoundError("Export failed: secret not found")
+        if (sw1==0x9c and sw2==0x30):
+            logger.warning("Export failed: lock error - try again")
+            #TODO: try again?
+            raise SeedKeeperLockError("Export failed: lock error - try again")
+        if (sw1==0x6F and sw2==0x00):
+            logger.warning(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            
         # parse header
         secret_dict= self.parser.parse_seedkeeper_header(response)
                 
         secret=[]
+        p2= 0x02
+        apdu=[cla, ins, p1, p2, lc]+data
         while(True):
             
             response, sw1, sw2 = self.card_transmit(apdu)
@@ -1171,6 +1187,7 @@ class CardConnector:
         secret_dict['secret']= secret
         secret_dict['secret_hex']= bytes(secret).hex()
         logger.debug(f"Secret: {secret_dict['secret_hex']}")
+        #TODO: parse secret depending to type for all possible cases
         
         # check fingerprint
         secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
@@ -1188,13 +1205,14 @@ class CardConnector:
         p1= 0x00
         
         # init
+        headers=[]
         p2= 0x01
         apdu=[cla, ins, p1, p2]
         response, sw1, sw2 = self.card_transmit(apdu)
         
         while (sw1==0x90 and sw2==0x00):
             secret_dict= self.parser.parse_seedkeeper_header(response)
-            
+            headers+=[secret_dict]
             #todo: verif signature
             
             # next object
@@ -1209,7 +1227,7 @@ class CardConnector:
         else:
             logger.warning(f"Error during object listing: {sw1} {sw2}")
             
-        return
+        return headers
 
 ####
     def seedkeeper_print_logs(self, print_all=True):
@@ -1287,6 +1305,19 @@ class UninitializedSeedError(Exception):
 class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
     pass
+    
+class SeedKeeperExportNotAllowedError(Exception):
+    """Raised when trying to export a secret that cannot be exported from a SeedKeeper"""
+    pass    
+
+class SeedKeeperObjectNotFoundError(Exception):
+    """Raised when trying to export a non-existent secret"""
+    pass   
+    
+class SeedKeeperLockError(Exception):
+    """Raised when lock error is raised by the SeedKeeper"""
+    pass   
+    
 
 if __name__ == "__main__":
 

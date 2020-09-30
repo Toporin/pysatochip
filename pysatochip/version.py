@@ -11,9 +11,16 @@ SATOCHIP_PROTOCOL_MAJOR_VERSION=0
 SATOCHIP_PROTOCOL_MINOR_VERSION=11
 SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCOL_MINOR_VERSION
 
+# SeedKeeper supported version tuple
+# v 0.1: initial version
+SEEDKEEPER_PROTOCOL_MAJOR_VERSION=0
+SEEDKEEPER_PROTOCOL_MINOR_VERSION=1
+SEEDKEEPER_PROTOCOL_VERSION= (SEEDKEEPER_PROTOCOL_MAJOR_VERSION<<8)+SEEDKEEPER_PROTOCOL_MINOR_VERSION
+
 # v0.11.a: initial version
 # v0.11.1: new versioning, minor changes
 # v0.11.2: use ecdsa & pyaes libraries instead of cryptography for ecdh key exchange
 # v0.11.3: add support for altcoin message signing in CardConnector.card_sign_message()
+# TODO: include SeedKeeper version...
 PYSATOCHIP_REVISION= 3
 PYSATOCHIP_VERSION= str(SATOCHIP_PROTOCOL_MAJOR_VERSION) + '.' + str(SATOCHIP_PROTOCOL_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
