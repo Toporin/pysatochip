@@ -1194,9 +1194,166 @@ class CardConnector:
         if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
             logger.debug("Fingerprints match !")
         else:
-            logger.error(f"Fingerprint mismatch: expected {fingerprint} but recovered {secret_dict['fingerprint_from_secret']} ")
+            logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
             
         return secret_dict
+    
+    #########################
+    
+    def seedkeeper_import_secure_secret(self, secret_dic, sid_pubkey, authentikey_importer=None, authentikey_exporter=None):
+        logger.debug("In seedkeeper_import_secure_secret")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA3
+        p1= 0x02
+        
+        # OP_INIT
+        p2= 0x01
+        label= secret_dic['label']
+        label_list= list( label.encode('utf-8') )
+        label_size= len(label_list)
+        secret_type= secret_dic['type']
+        export_rights= secret_dic['export_rights']
+        rfu1= secret_dic['rfu1']
+        rfu2= secret_dic['rfu2']
+        secret_base64= secret_dic['secret']
+        iv= list(bytes.fromhex(secret_dic['iv']))
+        
+        data= [secret_type, export_rights, rfu1, rfu2, label_size] + label_list + [(sid_pubkey>>8)%256, sid_pubkey%256] + iv
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        logger.debug(str(apdu)) #debug
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1!=0x90 or sw2!=0x00):
+            logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
+            return -1
+            
+        # OP_PROCESS
+        p2= 0x02
+        chunk_size=128;
+        secret_bytes= base64.decodebytes(secret_base64.encode('utf8'))
+        secret_list= list(secret_bytes)
+        secret_offset= 0
+        secret_remaining= len(secret_list)
+        while (secret_remaining>chunk_size):
+            data= [(chunk_size>>8), (chunk_size%256)] + secret_list[secret_offset:(secret_offset+chunk_size)]
+            lc=len(data)
+            apdu=[cla, ins, p1, p2, lc]+data
+            response, sw1, sw2 = self.card_transmit(apdu)
+            if (sw1!=0x90 or sw2!=0x00):
+                logger.error(f"Error during secret import - OP_PROCESS: {(sw1*256+sw2):0>4X}")
+                return -1
+            secret_offset+=chunk_size
+            secret_remaining-=chunk_size
+        
+        # OP_FINAL
+        p2= 0x03
+        data= [(secret_remaining>>8), (secret_remaining%256)] + secret_list[secret_offset:(secret_offset+secret_remaining)]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1!=0x90 or sw2!=0x00):
+            logger.error(f"Error during secret import - OP_FINAL: {(sw1*256+sw2):0>4X}")
+            return -1
+        secret_offset+=chunk_size
+        secret_remaining=0
+        
+        # check fingerprint
+        id= response[0]*256+response[1]
+        fingerprint_list= response[2:6]
+        fingerprint_from_seedkeeper= bytes(fingerprint_list).hex()
+        fingerprint_from_secret= secret_dic['fingerprint'] #hashlib.sha256(bytes(secret_list)).hexdigest()[0:8]
+        if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
+            logger.debug("Fingerprints match !")
+        else:
+            logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
+         
+        return id, fingerprint_from_seedkeeper
+        
+    #########################
+    def seedkeeper_export_secure_secret(self, sid, sid_pubkey= None):
+        logger.debug("In seedkeeper_export_secure_secret")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA5
+        if sid_pubkey is None:
+            p1= 0x01 # plain
+        else:
+            p1= 0x02 # secure
+        p2= 0x01
+        
+        data= [(sid>>8)%256, sid%256]
+        if (sid_pubkey is not None):
+            data+=[(sid_pubkey>>8)%256, sid_pubkey%256]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # initial call
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x9c and sw2==0x31):
+            logger.warning("Export failed: export not allowed by SeedKeeper policy.")
+            raise SeedKeeperExportNotAllowedError("Export failed: export not allowed by SeedKeeper policy.")
+        elif (sw1==0x9c and sw2==0x08):
+            logger.warning("Export failed: secret not found")
+            raise SeedKeeperObjectNotFoundError("Export failed: secret not found")
+        elif (sw1==0x9c and sw2==0x30):
+            logger.warning("Export failed: lock error - try again")
+            #TODO: try again?
+            raise SeedKeeperLockError("Export failed: lock error - try again")
+        else:
+            logger.warning(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            
+        # parse header
+        secret_dict= self.parser.parse_seedkeeper_header(response)
+        # iv
+        if sid_pubkey is not None:
+            iv=  response[-16:] #todo: parse also in parse_seedkeeper_header()?
+            logger.debug("IV:"+ bytes(iv).hex())
+            secret_dict['iv']=iv
+                
+        secret=[]
+        p2= 0x02
+        apdu=[cla, ins, p1, p2, lc]+data
+        while(True):
+            
+            response, sw1, sw2 = self.card_transmit(apdu)
+            # parse data
+            response_size= len(response)
+            chunk_size= (response[0]<<8)+response[1]
+            chunk= response[2:(2+chunk_size)]
+            secret+= chunk
+            
+            # check if last chunk
+            if (chunk_size+2<response_size):
+                offset= chunk_size+2
+                sign_size=  (response[offset]<<8)+response[offset+1]
+                offset+=2
+                sign= response[offset:(offset+sign_size)]
+                
+                #todo: hmac instead of signature
+                # check signature
+                full_data=secret_dict['header']+secret
+                self.parser.verify_signature(full_data, sign, self.parser.authentikey)
+                secret_dict['sign']=sign
+                secret_dict['full_data']= full_data
+                break
+        secret_dict['secret']= secret
+        secret_dict['secret_hex']= bytes(secret).hex()
+        logger.debug(f"Secret: {secret_dict['secret_hex']}")
+        #TODO: parse secret depending to type for all possible cases
+        
+        # check fingerprint
+        if sid_pubkey is None:
+            secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
+            if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
+                logger.debug("Fingerprints match !")
+            else:
+                logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
+            
+        return secret_dict
+    
+    #########################
     
     def seedkeeper_list_secret_headers(self):
         logger.debug("In seedkeeper_list_secret_headers")
