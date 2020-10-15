@@ -449,17 +449,17 @@ class CardDataParser:
             header_dict['label']=  str(bytes(header_dict['label_list']))
         header_dict['header']=  response[0:(15+header_dict['label_size'])]
         
-        logger.debug(f"++++++++++++++++++++++++++++++++")
-        logger.debug(f"Secret id: {header_dict['id']}")
-        logger.debug(f"Secret type: {header_dict['type']}")
-        logger.debug(f"Secret export_rights: {header_dict['export_rights']}")
-        logger.debug(f"Secret export_nbplain: {header_dict['export_nbplain']}")
-        logger.debug(f"Secret export_nbsecure: {header_dict['export_nbsecure']}")
-        logger.debug(f"Secret export_counter: {header_dict['export_counter']}")
-        logger.debug(f"Secret fingerprint: {header_dict['fingerprint']}")
-        logger.debug(f"Secret label: {header_dict['label']}")
-        logger.debug(f"Secret label_list: {header_dict['label_list']}")
-        logger.debug(f"++++++++++++++++++++++++++++++++")
+        # logger.debug(f"++++++++++++++++++++++++++++++++")
+        # logger.debug(f"Secret id: {header_dict['id']}")
+        # logger.debug(f"Secret type: {header_dict['type']}")
+        # logger.debug(f"Secret export_rights: {header_dict['export_rights']}")
+        # logger.debug(f"Secret export_nbplain: {header_dict['export_nbplain']}")
+        # logger.debug(f"Secret export_nbsecure: {header_dict['export_nbsecure']}")
+        # logger.debug(f"Secret export_counter: {header_dict['export_counter']}")
+        # logger.debug(f"Secret fingerprint: {header_dict['fingerprint']}")
+        # logger.debug(f"Secret label: {header_dict['label']}")
+        # logger.debug(f"Secret label_list: {header_dict['label_list']}")
+        # logger.debug(f"++++++++++++++++++++++++++++++++")
                     
         return header_dict
     

@@ -1057,6 +1057,7 @@ class CardConnector:
             
         return (response, sw1, sw2, id, fingerprint)
     
+    #DEPRECATED: use seedkeeper_import_secure_secret instead
     def seedkeeper_import_plain_secret(self, secret_type, export_rights, label, secret):
         logger.debug("In seedkeeper_import_plain_secret")
         cla= JCconstants.CardEdge_CLA
@@ -1129,6 +1130,7 @@ class CardConnector:
          
         return id, fingerprint_from_seedkeeper
     
+    #DEPRECATED: use seedkeeper_export_secure_secret instead
     def seedkeeper_export_plain_secret(self, id):
         logger.debug("In seedkeeper_export_plain_secret")
         cla= JCconstants.CardEdge_CLA
@@ -1210,15 +1212,7 @@ class CardConnector:
         p1= 0x02 if is_secure_import else 0x01
         
         # OP_INIT
-        p2= 0x01
-        # label= secret_dic['label']
-        # label_list= list( label.encode('utf-8') )
-        # label_size= len(label_list)
-        # secret_type= secret_dic['type']
-        # export_rights= secret_dic['export_rights']
-        # rfu1= secret_dic['rfu1']
-        # rfu2= secret_dic['rfu2']
-        
+        p2= 0x01        
         header= list(bytes.fromhex(secret_dic['header'][4:])) 
         
         #data= [secret_type, export_rights, rfu1, rfu2, label_size] + label_list + [(sid_pubkey>>8)%256, sid_pubkey%256] + iv
@@ -1238,9 +1232,10 @@ class CardConnector:
         p2= 0x02
         chunk_size=128;
         if (is_secure_import):
-            secret_base64= secret_dic['secret_base64']
-            secret_bytes= base64.decodebytes(secret_base64.encode('utf8'))
-            secret_list= list(secret_bytes)
+            secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
+            # secret_base64= secret_dic['secret_base64']
+            # secret_bytes= base64.decodebytes(secret_base64.encode('utf8'))
+            # secret_list= list(secret_bytes)
         else:
             secret_list= secret_dic['secret']
         secret_offset= 0
