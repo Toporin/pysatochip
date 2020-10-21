@@ -189,7 +189,7 @@ class CardConnector:
                 return ([], 0x00, 0x00)
         
         # no card present
-        self.client.request('show_error','No Satochip found! Please insert card!')
+        self.client.request('show_error','No card found! Please insert card!')
         return ([], 0x00, 0x00)
         #TODO return errror or throw exception?
             
@@ -206,11 +206,17 @@ class CardConnector:
         self.setup_done= None
         self.needs_secure_channel= None
         self.card_present= False
+        self.card_type= None
         if self.cardservice:
             self.cardservice.connection.disconnect()
             self.cardservice= None
         if self.client:
             self.client.request('update_status',False)
+        # reset authentikey
+        self.parser.authentikey=None
+        self.parser.authentikey_coordx= None
+        self.parser.authentikey_from_storage=None
+        
         
     def get_sw12(self, sw1, sw2):
         return 16*sw1+sw2
@@ -819,7 +825,7 @@ class CardConnector:
                     # msg = "WARNING: ONLY ONE ATTEMPT REMAINING! Enter the PIN for your Satochip: "
                 # else:
                     # msg = 'Enter the PIN for your Satochip: '
-                msg = 'Enter the PIN for your Satochip: '
+                msg = f'Enter the PIN for your {self.card_type}:'
                 (is_PIN, pin_0)= self.client.PIN_dialog(msg)
                 if not is_PIN:
                     raise RuntimeError(('Device cannot be unlocked without PIN code!'))
@@ -853,7 +859,7 @@ class CardConnector:
                 self.client.request('show_error', msg)
             # blocked PIN
             elif sw1==0x9c and sw2==0x0c:
-                msg = ("Too many failed attempts! Your Satochip has been blocked! You need your PUK code to unblock it.")
+                msg = (f"Too many failed attempts! Your card has been blocked! You need your PUK code to unblock it.")
                 self.client.request('show_error', msg)
                 raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
             # any other edge case
@@ -864,7 +870,7 @@ class CardConnector:
                 return (response, sw1, sw2)     
                 
         #if not self.card_present:
-        self.client.request('show_error', 'No Satochip found! Please insert card!')
+        self.client.request('show_error', 'No card found! Please insert card!')
         return
             
     def set_pin(self, pin_nbr, pin):
@@ -901,7 +907,7 @@ class CardConnector:
             self.client.request('show_error', msg)
         # blocked PIN
         elif sw1==0x9c and sw2==0x0c:
-            msg = ("Too many failed attempts! Your Satochip has been blocked! You need your PUK code to unblock it.")
+            msg = ("Too many failed attempts! Your card has been blocked! You need your PUK code to unblock it.")
             self.client.request('show_error', msg)
             raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
 	        
@@ -933,7 +939,7 @@ class CardConnector:
             self.client.request('show_error', msg)
         # blocked PUK
         elif sw1==0x9c and sw2==0x0c:
-            msg = ("Too many failed attempts! Your Satochip has been blocked!")
+            msg = ("Too many failed attempts! Your card has been blocked!")
             self.client.request('show_error', msg)
             raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
         
@@ -1057,158 +1063,156 @@ class CardConnector:
             
         return (response, sw1, sw2, id, fingerprint)
     
-    #DEPRECATED: use seedkeeper_import_secure_secret instead
-    def seedkeeper_import_plain_secret(self, secret_type, export_rights, label, secret):
-        logger.debug("In seedkeeper_import_plain_secret")
-        cla= JCconstants.CardEdge_CLA
-        ins= 0xA1
-        p1= 0x00
+    #DEPRECATED: use seedkeeper_import_secret instead
+    # def seedkeeper_import_plain_secret(self, secret_type, export_rights, label, secret):
+        # logger.debug("In seedkeeper_import_plain_secret")
+        # cla= JCconstants.CardEdge_CLA
+        # ins= 0xA1
+        # p1= 0x00
         
-        # OP_INIT
-        p2= 0x01
-        label_list= list( label.encode('utf-8') )
-        label_size= len(label_list)
+        # # OP_INIT
+        # p2= 0x01
+        # label_list= list( label.encode('utf-8') )
+        # label_size= len(label_list)
         
-        data= [secret_type, export_rights, label_size] + label_list
-        lc=len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
-        logger.debug(str(apdu)) #debug
-        response, sw1, sw2 = self.card_transmit(apdu)
-        if (sw1!=0x90 or sw2!=0x00):
-            logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
-            return -1
+        # data= [secret_type, export_rights, label_size] + label_list
+        # lc=len(data)
+        # apdu=[cla, ins, p1, p2, lc]+data
+        # logger.debug(str(apdu)) #debug
+        # response, sw1, sw2 = self.card_transmit(apdu)
+        # if (sw1!=0x90 or sw2!=0x00):
+            # logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
+            # return -1
             
-        # OP_PROCESS
-        p2= 0x02
-        chunk_size=128;
-        if type(secret)==str:
-            try:
-                secret_list= list(bytes.fromhex(secret)) #hex
-            except ValueError as e:
-                secret_list= list(secret.encode('utf-8'))
-        elif type(secret)==bytes:
-            secret_list= list(secret)
-        elif type(secret)==list:
-            secret_list= (secret)
-        else:
-            raise Exception("Unsupported format for secret")
+        # # OP_PROCESS
+        # p2= 0x02
+        # chunk_size=128;
+        # if type(secret)==str:
+            # try:
+                # secret_list= list(bytes.fromhex(secret)) #hex
+            # except ValueError as e:
+                # secret_list= list(secret.encode('utf-8'))
+        # elif type(secret)==bytes:
+            # secret_list= list(secret)
+        # elif type(secret)==list:
+            # secret_list= (secret)
+        # else:
+            # raise Exception("Unsupported format for secret")
         
-        secret_offset= 0
-        secret_remaining= len(secret_list)
-        while (secret_remaining>chunk_size):
-            data= [(chunk_size>>8), (chunk_size%256)] + secret_list[secret_offset:(secret_offset+chunk_size)]
-            lc=len(data)
-            apdu=[cla, ins, p1, p2, lc]+data
-            response, sw1, sw2 = self.card_transmit(apdu)
-            if (sw1!=0x90 or sw2!=0x00):
-                logger.error(f"Error during secret import - OP_PROCESS: {(sw1*256+sw2):0>4X}")
-                return -1
-            secret_offset+=chunk_size
-            secret_remaining-=chunk_size
+        # secret_offset= 0
+        # secret_remaining= len(secret_list)
+        # while (secret_remaining>chunk_size):
+            # data= [(chunk_size>>8), (chunk_size%256)] + secret_list[secret_offset:(secret_offset+chunk_size)]
+            # lc=len(data)
+            # apdu=[cla, ins, p1, p2, lc]+data
+            # response, sw1, sw2 = self.card_transmit(apdu)
+            # if (sw1!=0x90 or sw2!=0x00):
+                # logger.error(f"Error during secret import - OP_PROCESS: {(sw1*256+sw2):0>4X}")
+                # return -1
+            # secret_offset+=chunk_size
+            # secret_remaining-=chunk_size
         
-        # OP_FINAL
-        p2= 0x03
-        data= [(secret_remaining>>8), (secret_remaining%256)] + secret_list[secret_offset:(secret_offset+secret_remaining)]
-        lc=len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
-        response, sw1, sw2 = self.card_transmit(apdu)
-        if (sw1!=0x90 or sw2!=0x00):
-            logger.error(f"Error during secret import - OP_FINAL: {(sw1*256+sw2):0>4X}")
-            return -1
-        secret_offset+=chunk_size
-        secret_remaining=0
+        # # OP_FINAL
+        # p2= 0x03
+        # data= [(secret_remaining>>8), (secret_remaining%256)] + secret_list[secret_offset:(secret_offset+secret_remaining)]
+        # lc=len(data)
+        # apdu=[cla, ins, p1, p2, lc]+data
+        # response, sw1, sw2 = self.card_transmit(apdu)
+        # if (sw1!=0x90 or sw2!=0x00):
+            # logger.error(f"Error during secret import - OP_FINAL: {(sw1*256+sw2):0>4X}")
+            # return -1
+        # secret_offset+=chunk_size
+        # secret_remaining=0
         
-        # check fingerprint
-        id= response[0]*256+response[1]
-        fingerprint_list= response[2:6]
-        fingerprint_from_seedkeeper= bytes(fingerprint_list).hex()
-        fingerprint_from_secret= hashlib.sha256(bytes(secret_list)).hexdigest()[0:8]
-        if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
-            logger.debug("Fingerprints match !")
-        else:
-            logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
+        # # check fingerprint
+        # id= response[0]*256+response[1]
+        # fingerprint_list= response[2:6]
+        # fingerprint_from_seedkeeper= bytes(fingerprint_list).hex()
+        # fingerprint_from_secret= hashlib.sha256(bytes(secret_list)).hexdigest()[0:8]
+        # if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
+            # logger.debug("Fingerprints match !")
+        # else:
+            # logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
          
-        return id, fingerprint_from_seedkeeper
+        # return id, fingerprint_from_seedkeeper
     
     #DEPRECATED: use seedkeeper_export_secure_secret instead
-    def seedkeeper_export_plain_secret(self, id):
-        logger.debug("In seedkeeper_export_plain_secret")
-        cla= JCconstants.CardEdge_CLA
-        ins= 0xA2
-        p1= 0x00
-        p2= 0x01
+    # def seedkeeper_export_plain_secret(self, id):
+        # logger.debug("In seedkeeper_export_plain_secret")
+        # cla= JCconstants.CardEdge_CLA
+        # ins= 0xA2
+        # p1= 0x00
+        # p2= 0x01
         
-        data= [(id>>8)%256, id%256]
-        lc=len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
+        # data= [(id>>8)%256, id%256]
+        # lc=len(data)
+        # apdu=[cla, ins, p1, p2, lc]+data
         
-        # initial call
-        response, sw1, sw2 = self.card_transmit(apdu)
-        if (sw1==0x9c and sw2==0x31):
-            logger.warning("Export failed: export not allowed by SeedKeeper policy.")
-            raise SeedKeeperError("Export failed: export not allowed by SeedKeeper policy.")
-        if (sw1==0x9c and sw2==0x08):
-            logger.warning("Export failed: secret not found")
-            raise SeedKeeperError("Export failed: secret not found")
-        if (sw1==0x9c and sw2==0x30):
-            logger.warning("Export failed: lock error - try again")
-            #TODO: try again?
-            raise SeedKeeperError("Export failed: lock error - try again")
-        if (sw1==0x6F and sw2==0x00):
-            logger.warning(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
-            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+        # # initial call
+        # response, sw1, sw2 = self.card_transmit(apdu)
+        # if (sw1==0x9c and sw2==0x31):
+            # logger.warning("Export failed: export not allowed by SeedKeeper policy.")
+            # raise SeedKeeperError("Export failed: export not allowed by SeedKeeper policy.")
+        # if (sw1==0x9c and sw2==0x08):
+            # logger.warning("Export failed: secret not found")
+            # raise SeedKeeperError("Export failed: secret not found")
+        # if (sw1==0x9c and sw2==0x30):
+            # logger.warning("Export failed: lock error - try again")
+            # #TODO: try again?
+            # raise SeedKeeperError("Export failed: lock error - try again")
+        # if (sw1==0x6F and sw2==0x00):
+            # logger.warning(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            # raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
             
-        # parse header
-        secret_dict= self.parser.parse_seedkeeper_header(response)
+        # # parse header
+        # secret_dict= self.parser.parse_seedkeeper_header(response)
                 
-        secret=[]
-        p2= 0x02
-        apdu=[cla, ins, p1, p2, lc]+data
-        while(True):
+        # secret=[]
+        # p2= 0x02
+        # apdu=[cla, ins, p1, p2, lc]+data
+        # while(True):
             
-            response, sw1, sw2 = self.card_transmit(apdu)
-            # parse data
-            response_size= len(response)
-            chunk_size= (response[0]<<8)+response[1]
-            chunk= response[2:(2+chunk_size)]
-            secret+= chunk
+            # response, sw1, sw2 = self.card_transmit(apdu)
+            # # parse data
+            # response_size= len(response)
+            # chunk_size= (response[0]<<8)+response[1]
+            # chunk= response[2:(2+chunk_size)]
+            # secret+= chunk
             
-            # check if last chunk
-            if (chunk_size+2<response_size):
-                offset= chunk_size+2
-                sign_size=  (response[offset]<<8)+response[offset+1]
-                offset+=2
-                sign= response[offset:(offset+sign_size)]
+            # # check if last chunk
+            # if (chunk_size+2<response_size):
+                # offset= chunk_size+2
+                # sign_size=  (response[offset]<<8)+response[offset+1]
+                # offset+=2
+                # sign= response[offset:(offset+sign_size)]
                 
-                # check signature
-                full_data=secret_dict['header']+secret
-                self.parser.verify_signature(full_data, sign, self.parser.authentikey)
-                secret_dict['sign']=sign
-                secret_dict['full_data']= full_data
-                break
-        secret_dict['secret']= secret
-        secret_dict['secret_hex']= bytes(secret).hex()
-        logger.debug(f"Secret: {secret_dict['secret_hex']}")
-        #TODO: parse secret depending to type for all possible cases
+                # # check signature
+                # full_data=secret_dict['header']+secret
+                # self.parser.verify_signature(full_data, sign, self.parser.authentikey)
+                # secret_dict['sign']=sign
+                # secret_dict['full_data']= full_data
+                # break
+        # secret_dict['secret']= secret
+        # secret_dict['secret_hex']= bytes(secret).hex()
+        # logger.debug(f"Secret: {secret_dict['secret_hex']}")
+        # #TODO: parse secret depending to type for all possible cases
         
-        # check fingerprint
-        secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
-        if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
-            logger.debug("Fingerprints match !")
-        else:
-            logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
+        # # check fingerprint
+        # secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
+        # if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
+            # logger.debug("Fingerprints match !")
+        # else:
+            # logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
             
-        return secret_dict
+        # return secret_dict
     
-    #########################
-    
-    def seedkeeper_import_secure_secret(self, secret_dic, sid_pubkey=None):
-        logger.debug("In seedkeeper_import_secure_secret")
+    def seedkeeper_import_secret(self, secret_dic, sid_pubkey=None):
+        logger.debug("In seedkeeper_import_secret")
         
-        is_secure_import= True if sid_pubkey else False
+        is_secure_import= False if (sid_pubkey is None) else True
         
         cla= JCconstants.CardEdge_CLA
-        ins= 0xA3
+        ins= 0xA1
         p1= 0x02 if is_secure_import else 0x01
         
         # OP_INIT
@@ -1222,7 +1226,6 @@ class CardConnector:
             data+= [(sid_pubkey>>8)%256, sid_pubkey%256] + iv
         lc=len(data)
         apdu=[cla, ins, p1, p2, lc]+data
-        logger.debug(str(apdu)) #debug
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1!=0x90 or sw2!=0x00):
             logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
@@ -1285,13 +1288,13 @@ class CardConnector:
         return id, fingerprint_from_seedkeeper
         
     #########################
-    def seedkeeper_export_secure_secret(self, sid, sid_pubkey= None):
-        logger.debug("In seedkeeper_export_secure_secret")
+    def seedkeeper_export_secret(self, sid, sid_pubkey= None):
+        logger.debug("In seedkeeper_export_secret")
         
-        is_secure_export= True if sid_pubkey else False
+        is_secure_export= False if (sid_pubkey is None) else True
         
         cla= JCconstants.CardEdge_CLA
-        ins= 0xA5
+        ins= 0xA2
         p1= 0x02 if is_secure_export else 0x01
         p2= 0x01
         
@@ -1393,13 +1396,17 @@ class CardConnector:
             p2= 0x02
             apdu=[cla, ins, p1, p2]
             response, sw1, sw2 = self.card_transmit(apdu)
-            
-            #TODO: create array of dicts
         
-        if (sw1==0x9C and sw2==0x12):
+        if  (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x9C and sw2==0x12):
             logger.debug(f"No more object in memory")
+        elif (sw1==0x9C and sw2==0x04):
+            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
-            logger.warning(f"Error during object listing: {sw1} {sw2}")
+            logger.warning(f"Unexpected error during object listing: {sw1} {sw2}")
+            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
             
         return headers
 
@@ -1429,6 +1436,12 @@ class CardConnector:
                 logger.debug("Latest log: "+ str(logs[0]))
             else:
                 logger.debug("No logs available!")           
+        elif (sw1==0x9C and sw2==0x04):
+            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            raise UninitializedSeedError("SeedKeeper is not initialized!")
+        else:
+            logger.warning(f"Unexpected error during object listing: {sw1} {sw2}")
+            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")    
             
         #next logs
         p2= 0x02
@@ -1480,17 +1493,18 @@ class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
     pass
     
-class SeedKeeperExportNotAllowedError(Exception):
-    """Raised when trying to export a secret that cannot be exported from a SeedKeeper"""
-    pass    
+# TODO: remove    
+# class SeedKeeperExportNotAllowedError(Exception):
+    # """Raised when trying to export a secret that cannot be exported from a SeedKeeper"""
+    # pass    
 
-class SeedKeeperObjectNotFoundError(Exception):
-    """Raised when trying to export a non-existent secret"""
-    pass   
+# class SeedKeeperObjectNotFoundError(Exception):
+    # """Raised when trying to export a non-existent secret"""
+    # pass   
     
-class SeedKeeperLockError(Exception):
-    """Raised when lock error is raised by the SeedKeeper"""
-    pass   
+# class SeedKeeperLockError(Exception):
+    # """Raised when lock error is raised by the SeedKeeper"""
+    # pass   
 
 class SeedKeeperError(Exception):
     """Raised when an error is returned by the SeedKeeper"""
