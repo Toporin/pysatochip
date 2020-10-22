@@ -287,7 +287,46 @@ class CardConnector:
             #raise RuntimeError('Unknown get-status() error code:'+hex(sw1)+' '+hex(sw2))
             
         return (response, sw1, sw2, d)
-
+    
+    def card_get_label(self):
+        logger.debug("In card_get_label")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3D
+        p1= 0x00
+        p2= 0x01 #get
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        if (sw1==0x90 and sw2==0x00):
+            label_size= response[0]
+            try:
+                label= bytes(response[1:]).decode('utf8')
+            except UnicodeDecodeError as e:
+                logger.warning("UnicodeDecodeError while decoding card label !")
+                label=  str(bytes(response[1:]))
+        elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
+            label= '(none)'
+        else:
+            logger.warning(f"Error while recovering card label: {sw1} {sw2}")
+            label= '(unknown)'
+        
+        return (response, sw1, sw2, label)
+        
+    def card_set_label(self, label):
+        logger.debug("In card_set_label")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3D
+        p1= 0x00
+        p2= 0x00 #set
+        
+        label_list= list(label.encode('utf8'))
+        data= [len(label_list)]+label_list
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        return (response, sw1, sw2)
+    
     def card_setup(self,
                     pin_tries0, ublk_tries0, pin0, ublk0,
                     pin_tries1, ublk_tries1, pin1, ublk1,
@@ -1372,8 +1411,6 @@ class CardConnector:
                 logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
             
         return secret_dict
-    
-    #########################
     
     def seedkeeper_list_secret_headers(self):
         logger.debug("In seedkeeper_list_secret_headers")
