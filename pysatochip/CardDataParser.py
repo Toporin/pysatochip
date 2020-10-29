@@ -328,7 +328,25 @@ class CardDataParser:
             raise ValueError("Unable to recover authentikey from signature")
 
         return pk
-
+    
+    def get_trusted_pubkey(self, response):
+        pubkey_size= response[0]*256+response[1]
+        if (pubkey_size !=65):
+            raise RuntimeError(f'Error while recovering trusted pubkey: wrong pubkey size, expected 65 but received {pubkey_size}')
+        data= response[0:(2+pubkey_size)]
+        sig_size= response[2+pubkey_size]*256 + response[2+pubkey_size+1] 
+        sig= response[(2+pubkey_size+2):(2+pubkey_size+2+sig_size)]
+        
+        pubkey_hex= bytes(response[2:2+pubkey_size]).hex()
+        logger.debug(f"Verifying sig for pubkey {pubkey_hex} using authentikey {self.authentikey.get_public_key_bytes(compressed=False).hex()}")
+        
+        try:
+            self.verify_signature(data, sig, self.authentikey)
+        except Exception as ex:
+            logger.error('Exception in get_trusted_pubkey: ' + str(ex))
+            
+        return pubkey_hex
+    
     ##############
     def parse_parse_transaction(self, response):
         '''Satochip returns: [(hash_size+2)(2b) | tx_hash(32b) | need2fa(2b) | sig_size(2b) | sig(sig_size) | txcontext]'''

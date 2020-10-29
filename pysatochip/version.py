@@ -7,8 +7,9 @@
 # v0.9: patch message signing for alts
 # v0.10: sign tx hash
 # v0.11: support for (mandatory) secure channel
+# v0.12: card label & support for encrypted seed import from SeedKeeper
 SATOCHIP_PROTOCOL_MAJOR_VERSION=0
-SATOCHIP_PROTOCOL_MINOR_VERSION=11
+SATOCHIP_PROTOCOL_MINOR_VERSION=12
 SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCOL_MINOR_VERSION
 
 # SeedKeeper supported version tuple
