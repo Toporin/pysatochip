@@ -229,12 +229,14 @@ class CardConnector:
         
         if sw1==0x90 and sw2==0x00:
             self.card_type="Satochip"
+            logger.debug("Found a Satochip!")
         else:
             SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
             apdu = SELECT + CardConnector.SEEDKEEPER_AID
             (response, sw1, sw2) = self.card_transmit(apdu)
             if sw1==0x90 and sw2==0x00:
                 self.card_type="SeedKeeper"
+                logger.debug("Found a SeedKeeper!")
         
         # TODO: also done in RemovalObserver.update() => remove one
         #reset secure channel if needed
@@ -428,7 +430,7 @@ class CardConnector:
         ins= 0xAC
         p1= 0x00
         p2= 0x00        
-        header= list(bytes.fromhex(secret_dic['header'][4:])) 
+        header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) 
         iv= list(bytes.fromhex(secret_dic['iv']))
         secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
         hmac= list(bytes.fromhex(secret_dic['hmac']))
