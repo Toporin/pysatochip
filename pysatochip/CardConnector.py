@@ -430,7 +430,7 @@ class CardConnector:
         ins= 0xAC
         p1= 0x00
         p2= 0x00        
-        header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) 
+        header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) # first 2 bytes are sid
         iv= list(bytes.fromhex(secret_dic['iv']))
         secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
         hmac= list(bytes.fromhex(secret_dic['hmac']))
@@ -482,6 +482,15 @@ class CardConnector:
         lc=len(data)
         apdu=[cla, ins, p1, p2, lc]+data
         response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x6D and sw2==0x00): 
+            logger.error(f"Error during secret import: operation not supported by the card (0x6D00)")
+            raise CardError(f"Error during secret import: operation not supported by the card (0x6D00)")
+        elif (sw1==0x9C and sw2==0x17):
+            logger.error(f"Error during secret import: card is already seeded (0x9C17)")
+            raise CardError('Secure import failed: card is already seeded (0x9C17)!')
+        elif (sw1==0x9C and sw2==0x0F):
+            logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
+            raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
         
         pubkey_hex=self.parser.get_trusted_pubkey(response)
         return pubkey_hex
@@ -494,9 +503,10 @@ class CardConnector:
         p2= 0x00    
         apdu=[cla, ins, p1, p2]
         response, sw1, sw2 = self.card_transmit(apdu)
-        
         if (sw1==0x9C and sw2==0x35):
             return 65*'00'
+        if (sw1==0x6D and sw2==0x00): # instruction not supported
+            return 65*'FF'
         
         pubkey_hex=self.parser.get_trusted_pubkey(response)
         return pubkey_hex
