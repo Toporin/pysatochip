@@ -29,8 +29,15 @@ setuptools.setup(
         'Source': 'https://github.com/Toporin/pysatochip/',
         'Tracker': 'https://github.com/Toporin/pysatochip/issues',
     },
-    packages=setuptools.find_packages(),
     install_requires=requirements,
+    packages=setuptools.find_packages(),
+    package_dir={
+        'pysatochip': 'pysatochip'
+    },
+    package_data={
+        'pysatochip': ['cert/*.crt'],
+    },
+    
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",

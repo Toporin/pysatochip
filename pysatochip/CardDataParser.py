@@ -18,8 +18,11 @@
  * limitations under the License.
 """
 import logging 
+import base64
 from hashlib import sha256
 from struct import pack, unpack
+from ecdsa.curves import SECP256k1
+from ecdsa.util import sigdecode_der
 
 from .ecc import ECPubkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 
@@ -435,6 +438,10 @@ class CardDataParser:
         # v= compsig[0]-27 if (compsig[0]<=28)  else compsig[0]-27-4 # recid is 0 or 1
         # return (r,s,v)
     
+    #################################
+    #                  SEEDKEEPER              #        
+    #################################   
+    
     def parse_seedkeeper_header(self, response):
         # parse header
         
@@ -495,6 +502,45 @@ class CardDataParser:
         res= log[5]*256+ log[6]
         
         return (ins, id1, id2, res)
+        
+    #################################
+    #                   PERSO PKI                 #        
+    #################################    
+    
+    def convert_bytes_to_string_pem(self, cert_bytes):
+        
+        logger.debug(f"certbytes size: {str(len(cert_bytes))}")
+        logger.debug(f"convert_bytes_to_string_pem certbytes: {str(cert_bytes)}")
+        logger.debug(f"convert_bytes_to_string_pem certbytes: {bytes(cert_bytes).hex()}")
+        cert_bytes_b64 = base64.b64encode(bytes(cert_bytes))
+        cert_b64= cert_bytes_b64.decode('ascii')
+        cert_pem= "-----BEGIN CERTIFICATE-----\r\n" 
+        cert_pem+= '\r\n'.join([cert_b64[i:i+64] for i in range(0, len(cert_b64), 64)]) 
+        cert_pem+= "\r\n-----END CERTIFICATE-----"
+        return cert_pem
+        
+    def verify_challenge_response_pki(self, response, challenge_from_host, pubkey):
+        logger.debug("In verify_challenge_response_pki")
+        
+        from ecdsa import VerifyingKey, BadSignatureError, MalformedPointError
+        
+        # parse response 
+        challenge_from_device= bytes(response[0:32])
+        sig_size= ((response[32] & 0xFF)<<8) + (response[33] & 0xFF)
+        sig= bytes(response[34:(34+sig_size)])
+        challenge= "Challenge:".encode("utf-8") + challenge_from_device + challenge_from_host
+        logger.debug("challenge: "+ challenge.hex())
+        
+        # parse pubkey & verify sig
+        vk = VerifyingKey.from_string(bytes(pubkey), curve=SECP256k1, hashfunc=sha256, validate_point=True)
+        try:
+            vk.verify(sig, challenge, hashfunc=sha256, sigdecode=sigdecode_der)
+            return True, ""
+        except BadSignatureError:
+            return False, "Bad signature during challenge response!"
+        except MalformedPointError:
+            return False, "Invalid X9.62 encoding of the public key: " + bytes(pubkey).hex()
+        
         
         
     

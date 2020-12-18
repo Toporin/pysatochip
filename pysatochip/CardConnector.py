@@ -13,6 +13,7 @@ from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
 from .util import msg_magic, sha256d
 from .version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION, PYSATOCHIP_VERSION
+from .certificate_validator import CertificateValidator
 
 import hashlib
 import hmac
@@ -139,6 +140,7 @@ class CardConnector:
         self.pin=None
         # SeedKeeper or Satochip?
         self.card_type= None
+        self.cert_pem=None # PEM certificate of device, if any
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
         try:
@@ -414,7 +416,8 @@ class CardConnector:
                 raise RuntimeError('Authentikey mismatch: local value differs from card value!')
                 
             self.is_seeded= True
-            
+        #todo: check sw12 error codes (0x9C17...)
+        
         return authentikey
     
     def card_bip32_import_encrypted_seed(self, secret_dic):
@@ -1489,8 +1492,104 @@ class CardConnector:
         return (logs, nbtotal_logs, nbavail_logs)
 
     #################################
+    #                   PERSO PKI                 #        
+    #################################    
+    def card_export_perso_pubkey(self):
+        logger.debug("In card_export_perso_pubkey")
+        cla= JCconstants.CardEdge_CLA
+        ins= JCconstants.INS_EXPORT_PKI_PUBKEY
+        p1= 0x00
+        p2= 0x00
+        apdu=[cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x6D and sw2==0x00):
+            logger.error(f"Error during personalization pubkey export: command unsupported(0x6D00")
+            raise CardError(f"Error during personalization pubkey export: command unsupported (0x6D00)")
+        else: 
+            logger.error(f"Error during personalization pubkey export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            raise UnexpectedSW12Error(f"Unexpected error during personalization pubkey export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+        return response
+    
+    def card_export_perso_certificate(self):
+        logger.debug("In card_export_perso_certificate")
+        cla= JCconstants.CardEdge_CLA
+        ins= JCconstants.INS_EXPORT_PKI_CERTIFICATE
+        p1= 0x00
+        p2= 0x01 #init
+        
+        #init
+        apdu=[cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x6D and sw2==0x00):
+            logger.error(f"Error during personalization certificate export: command unsupported(0x6D00)")
+            raise CardError(f"Error during personalization certificate export: command unsupported (0x6D00)")
+        elif (sw1==0x00 and sw2==0x00):
+            logger.error(f"Error during personalization certificate export: no card present(0x0000)")
+            raise CardNotPresentError(f"Error during personalization certificate export: no card present (0x0000)")
+        else: 
+            logger.error(f"Error during personalization certificate export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            raise UnexpectedSW12Error(f"Unexpected error during personalization certificate export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+        
+        certificate_size= (response[0] & 0xFF)*256 + (response[1] & 0xFF)
+        if (certificate_size==0):
+            return "(empty)"
+                
+        # UPDATE apdu: certificate data in chunks
+        p2= 0x02 #update
+        certificate= certificate_size*[0]
+        chunk_size=128;
+        chunk=[]
+        remaining_size= certificate_size;
+        cert_offset=0;
+        while(remaining_size>128):
+            # data=[ chunk_offset(2b) | chunk_size(2b) ]
+            data= [ ((cert_offset>>8)&0xFF), (cert_offset&0xFF) ]
+            data+= [ 0,  (chunk_size & 0xFF) ] 
+            apdu=[cla, ins, p1, p2, len(data)]+data
+            response, sw1, sw2 = self.card_transmit(apdu)
+            certificate[cert_offset:(cert_offset+chunk_size)]=response[0:chunk_size]
+            remaining_size-=chunk_size;
+            cert_offset+=chunk_size;
+        
+        # last chunk
+        data= [ ((cert_offset>>8)&0xFF), (cert_offset&0xFF) ]
+        data+= [ 0,  (remaining_size & 0xFF) ] 
+        apdu=[cla, ins, p1, p2, len(data)]+data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        certificate[cert_offset:(cert_offset+remaining_size)]=response[0:remaining_size]    
+        
+        # parse and return raw certificate
+        self.cert_pem= self.parser.convert_bytes_to_string_pem(certificate)
+        return self.cert_pem
+    
+    def card_challenge_response_pki(self, pubkey):
+        logger.debug("In card_challenge_response_pki")
+        cla= JCconstants.CardEdge_CLA
+        ins= JCconstants.INS_CHALLENGE_RESPONSE_PKI
+        p1= 0x00
+        p2= 0x00
+        
+        challenge_from_host= urandom(32)
+        
+        apdu=[cla, ins, p1, p2, len(challenge_from_host)]+ list(challenge_from_host)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        
+        # verify challenge-response
+        verif= self.parser.verify_challenge_response_pki(response, challenge_from_host, pubkey)
+        
+        return verif;
+    
+    
+    
+
+    #################################
     #                     HELPERS                 #        
     ################################# 
+    
     def get_authentikey_from_masterseed(self, masterseed):
         # compute authentikey locally from masterseed
         # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', masterseed)
@@ -1530,6 +1629,10 @@ class UnexpectedSW12Error(Exception):
     # pass   
     
 class CardError(Exception):
+    """Raised when the device returns an error code"""
+    pass
+
+class CardNotPresentError(Exception):
     """Raised when the device returns an error code"""
     pass
 

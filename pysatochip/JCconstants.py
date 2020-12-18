@@ -112,6 +112,21 @@ class JCconstants:
 
     # 2FA
     INS_SET_2FA_KEY = 0x79;
+    
+    # Secure Channel
+    INS_INIT_SECURE_CHANNEL =  0x81;
+    INS_PROCESS_SECURE_CHANNEL =  0x82;
+    
+    # Perso PKI
+    INS_IMPORT_PKI_CERTIFICATE = 0x92;
+    INS_EXPORT_PKI_CERTIFICATE = 0x93;
+    INS_SIGN_PKI_CSR = 0x94;
+    INS_SET_ALLOWED_CARD_AID = 0x95;
+    INS_GET_ALLOWED_CARD_AID = 0x96;
+    INS_EXPORT_PKI_PUBKEY = 0x98;
+    INS_LOCK_PKI = 0x99;
+    INS_CHALLENGE_RESPONSE_PKI= 0x9A;
+
 
     '''****************************************
        *             Error codes              *
