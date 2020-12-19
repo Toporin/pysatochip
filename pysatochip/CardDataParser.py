@@ -509,9 +509,9 @@ class CardDataParser:
     
     def convert_bytes_to_string_pem(self, cert_bytes):
         
-        logger.debug(f"certbytes size: {str(len(cert_bytes))}")
-        logger.debug(f"convert_bytes_to_string_pem certbytes: {str(cert_bytes)}")
-        logger.debug(f"convert_bytes_to_string_pem certbytes: {bytes(cert_bytes).hex()}")
+        #logger.debug(f"certbytes size: {str(len(cert_bytes))}")
+        #logger.debug(f"convert_bytes_to_string_pem certbytes: {str(cert_bytes)}")
+        #logger.debug(f"convert_bytes_to_string_pem certbytes: {bytes(cert_bytes).hex()}")
         cert_bytes_b64 = base64.b64encode(bytes(cert_bytes))
         cert_b64= cert_bytes_b64.decode('ascii')
         cert_pem= "-----BEGIN CERTIFICATE-----\r\n" 

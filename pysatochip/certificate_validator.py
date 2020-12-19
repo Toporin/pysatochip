@@ -14,13 +14,6 @@ class CertificateValidator:
         logger.setLevel(loglevel)
         logger.debug("In __init__")
         
-        if getattr( sys, 'frozen', False ):
-            # running in a bundle
-            self.pkg_dir= sys._MEIPASS # for pyinstaller
-        else :
-            # running live
-            self.pkg_dir = os.path.split(os.path.realpath(__file__))[0]
-        
     def validate_certificate_chain(self, device_pem, device_type):
         logger.debug("In validate_certificate_chain")
         
@@ -28,13 +21,14 @@ class CertificateValidator:
         device_pubkey= bytes(65*[0])
         
         # load subca according to device type
-        path_ca = os.path.join(self.pkg_dir, 'cert/ca.cert')
+        directory=os.path.join(os.path.dirname(__file__), "cert")
+        path_ca = os.path.join(directory, 'ca.cert')
         if device_type=="SeedKeeper":
-            path_subca = os.path.join(self.pkg_dir, 'cert/subca-seedkeeper.cert')
+            path_subca = os.path.join(directory, 'subca-seedkeeper.cert')
         elif device_type=="Satochip":
-            path_subca = os.path.join(self.pkg_dir, 'cert/subca-satochip.cert')
+            path_subca = os.path.join(directory, 'subca-satochip.cert')
         elif device_type=="SatoDime":
-            path_subca = os.path.join(self.pkg_dir, 'cert/subca-satodime.cert')
+            path_subca = os.path.join(directory, 'subca-satodime.cert')
         else:
             txt_error= "Unknown card_type: "+ str(device_type)
             return False, device_pubkey, txt_ca, txt_subca, txt_device, txt_error
@@ -42,9 +36,9 @@ class CertificateValidator:
         # for testing purpose only!
         TEST=False
         if TEST:
-            #path_ca = os.path.join(self.pkg_dir, 'cert/bad-ca.cert') #for testing purpose!
-            path_ca = os.path.join(self.pkg_dir, 'cert/test-ca.cert') #for testing purpose!
-            path_subca = os.path.join(self.pkg_dir, 'cert/test-subca-seedkeeper.cert') #for testing purpose!
+            #path_ca = os.path.join(directory, 'bad-ca.cert') #for testing purpose!
+            path_ca = os.path.join(directory, 'test-ca.cert') #for testing purpose!
+            path_subca = os.path.join(directory, 'test-subca-seedkeeper.cert') #for testing purpose! 
             
         # todo: FileNotFoundError
         with open(path_ca, 'r', encoding='utf-8') as f:

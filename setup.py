@@ -35,7 +35,7 @@ setuptools.setup(
         'pysatochip': 'pysatochip'
     },
     package_data={
-        'pysatochip': ['cert/*.crt'],
+        'pysatochip': ['cert/*.cert'],
     },
     
     classifiers=[
