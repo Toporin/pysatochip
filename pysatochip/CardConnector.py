@@ -401,6 +401,7 @@ class CardConnector:
             authentikey_hex= authentikey.get_public_key_bytes(True).hex()
             logger.debug('[card_bip32_import_seed] authentikey_card= ' + authentikey_hex)
             
+            # TODO: remove check if authentikey is not derived from seed
             # compute authentikey locally from seed 
             pub_hex= self.get_authentikey_from_masterseed(seed)
             # # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', seed)
@@ -420,6 +421,7 @@ class CardConnector:
         
         return authentikey
     
+    # deprecated, use card_import_encrypted_secret() instead
     def card_bip32_import_encrypted_seed(self, secret_dic):
         '''Import an encrypted BIP32 masterseed exported from a SeedKeeper.
         
@@ -471,6 +473,63 @@ class CardConnector:
             
         return authentikey
     
+    def card_import_encrypted_secret(self, secret_dic):
+        '''Import an encrypted secret (BIP32 masterseed or 2FA secret) exported from a SeedKeeper.
+        
+        The secret is encrypted using a shared key generated using ECDH with the 2 devices authentikeys.
+         Before import can be done, the two device should be paired by importing the 
+         Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
+         and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().'''
+        logger.debug("In card_import_encrypted_secret")
+        
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xAC
+        p1= 0x00
+        p2= 0x00        
+        header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) # first 2 bytes are sid
+        iv= list(bytes.fromhex(secret_dic['iv']))
+        secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
+        hmac= list(bytes.fromhex(secret_dic['hmac']))
+        data= header + iv + [(len(secret_list)>>8), (len(secret_list)%256)] + secret_list + [len(hmac)] + hmac
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            pass 
+        elif (sw1==0x6d and sw2==0x00):
+            logger.error(f"Error during secret import: operation not supported by the card (0x6D00)")
+            raise CardError(f"Error during secret import: operation not supported by the card (0x6D00)")
+        elif (sw1==0x9C and sw2==0x17):
+            logger.error(f"Error during secret import: card is already seeded (0x9C17)")
+            raise CardError('Secure import failed: card is already seeded (0x9C17)!')
+        elif (sw1==0x9C and sw2==0x18):
+            logger.error(f"Error during secret import: card already requires 2FA (0x9C18)")
+            raise CardError('Secure import failed: card already requires 2FA (0x9C18)!')
+        elif (sw1==0x9C and sw2==0x0F):
+            logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
+            raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
+        elif (sw1==0x9C and sw2==0x33):
+            logger.error(f"Error during secret import: wrong MAC (0x9C33)")
+            raise CardError('Secure import failed: wrong MAC (0x9C33)!')
+        elif (sw1==0x9C and sw2==0x34):
+            logger.error(f"Error during secret import: wrong fingerprint (0x9C34)")
+            raise CardError('Secure import failed: wrong fingerprint (0x9C34)!')
+        elif (sw1==0x9C and sw2==0x35):
+            logger.error(f"Error during secret import: no TrustedPubkey (0x9C35)")
+            raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
+        else:
+            logger.error(f"Error during secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+        
+        secret_type= header[0]
+        if  secret_type==0x10:
+            authentikey= self.parser.parse_bip32_get_authentikey(response)
+            authentikey_hex= authentikey.get_public_key_bytes(True).hex()
+            logger.debug('authentikey_card= ' + authentikey_hex)
+            return authentikey
+        elif  secret_type==0xB0:
+            return None
+            
     def card_import_trusted_pubkey(self, pubkey_list):
         logger.debug("In card_import_trusted_pubkey")
         cla= JCconstants.CardEdge_CLA
@@ -1224,6 +1283,34 @@ class CardConnector:
             
         return (response, sw1, sw2, id, fingerprint)
     
+    def seedkeeper_generate_2FA_secret(self, export_rights, label:str):
+        logger.debug("In seedkeeper_generate_2FA_secret")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xAE
+        p1= 0x00
+        p2= export_rights
+        
+        label= list(label.encode('utf-8'))
+        label_size= len(label)
+        data= [label_size]+label
+        
+        lc= len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # send apdu (contains sensitive data!)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            id= (response[0]<<8)+response[1]
+            logger.debug(f"2FA secret generated successfully with id: {id}")
+            fingerprint_list= response[2:2+4]
+            fingerprint= bytes(fingerprint_list).hex()
+        else:
+            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            id=None
+            fingerprint= None
+            
+        return (response, sw1, sw2, id, fingerprint)
+        
     def seedkeeper_import_secret(self, secret_dic, sid_pubkey=None):
         logger.debug("In seedkeeper_import_secret")
         
