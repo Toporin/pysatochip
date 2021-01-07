@@ -1,7 +1,7 @@
 import setuptools
 import importlib.util
 
-with open("readme.md", "r") as fh:
+with open("README.md", "r") as fh:
     long_description = fh.read()
 
 with open('requirements.txt') as f:
