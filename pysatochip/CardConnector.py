@@ -401,20 +401,11 @@ class CardConnector:
             authentikey_hex= authentikey.get_public_key_bytes(True).hex()
             logger.debug('[card_bip32_import_seed] authentikey_card= ' + authentikey_hex)
             
-            # TODO: remove check if authentikey is not derived from seed
             # compute authentikey locally from seed 
-            pub_hex= self.get_authentikey_from_masterseed(seed)
-            # # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', seed)
-            # bytekey= bytes('Bitcoin seed2', 'utf8') #b'Bitcoin seed2'
-            # byteseed= bytes(seed)
-            # mac= hmac.new(bytekey, byteseed, hashlib.sha512).digest()[0:32]
-            # priv= ECPrivkey(mac)
-            # pub= priv.get_public_key_bytes(True)
-            # pub_hex= pub.hex()
-            # logger.debug('[card_bip32_import_seed] authentikey_local= ' + pub_hex)
-            
-            if (pub_hex != authentikey_hex):
-                raise RuntimeError('Authentikey mismatch: local value differs from card value!')
+            # TODO: remove check if authentikey is not derived from seed
+            #pub_hex= self.get_authentikey_from_masterseed(seed)
+            # if (pub_hex != authentikey_hex):
+                # raise RuntimeError('Authentikey mismatch: local value differs from card value!')
                 
             self.is_seeded= True
         #todo: check sw12 error codes (0x9C17...)
