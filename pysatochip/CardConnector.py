@@ -91,13 +91,13 @@ class RemovalObserver(CardObserver):
                 if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                     self.cc.card_disconnect()
                     break
-                # TODO: also done in card_select() => remove one?
+
                 if (self.cc.needs_secure_channel):
                     self.cc.card_initiate_secure_channel()
                     
             except Exception as exc:
                 logger.warning(f"Error during connection: {repr(exc)}")
-            if self.cc.client:
+            if self.cc.client is not None:
                 self.cc.client.request('update_status',True)                
                 
         for card in removedcards:
@@ -116,7 +116,7 @@ class CardConnector:
     # v0.9: patch message signing for alts
     # v0.10: sign tx hash
     # v0.11: support for (mandatory) secure channel
-    
+    # v0.12: support for SeedKeeper &  factory-reset & Perso certificate & card label
     # define the apdus used in this script
     SATOCHIP_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
     SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SatoChip
@@ -128,7 +128,8 @@ class CardConnector:
         self.logger= logger
         self.parser=CardDataParser(loglevel)
         self.client=client
-        self.client.cc=self
+        if self.client is not None:
+            self.client.cc=self
         self.cardtype = AnyCardType() #TODO: specify ATR to ignore connection to wrong card types?
         self.needs_2FA = None
         self.is_seeded= None
@@ -186,12 +187,14 @@ class CardConnector:
                 
             except Exception as exc:
                 logger.warning(f"Error during connection: {repr(exc)}")
-                self.client.request('show_error',"Error during connection:"+repr(exc))
                 traceback.print_exc() #debug
+                if self.client is not None:
+                    self.client.request('show_error',"Error during connection:"+repr(exc))
                 return ([], 0x00, 0x00)
         
         # no card present
-        self.client.request('show_error','No card found! Please insert card!')
+        if self.client is not None:
+            self.client.request('show_error','No card found! Please insert card!')
         return ([], 0x00, 0x00)
         #TODO return errror or throw exception?
             
@@ -212,7 +215,7 @@ class CardConnector:
         if self.cardservice:
             self.cardservice.connection.disconnect()
             self.cardservice= None
-        if self.client:
+        if self.client is not None:
             self.client.request('update_status',False)
         # reset authentikey
         self.parser.authentikey=None
@@ -240,11 +243,6 @@ class CardConnector:
                 self.card_type="SeedKeeper"
                 logger.debug("Found a SeedKeeper!")
         
-        # TODO: also done in RemovalObserver.update() => remove one
-        #reset secure channel if needed
-        # if (self.needs_secure_channel): 
-            # logger.debug("In card_select: card_initiate_secure_channel")
-            # self.card_initiate_secure_channel()
         return (response, sw1, sw2)
 
     def card_get_status(self):
@@ -1031,14 +1029,11 @@ class CardConnector:
         
         while (self.card_present):
             if self.pin is None:
-                # (response, sw1, sw2, d)=self.card_get_status() # get number of pin tries remaining
-                # if d.get("PIN0_remaining_tries",-1)==1:
-                    # msg = "WARNING: ONLY ONE ATTEMPT REMAINING! Enter the PIN for your Satochip: "
-                # else:
-                    # msg = 'Enter the PIN for your Satochip: '
-                msg = f'Enter the PIN for your {self.card_type}:'
-                (is_PIN, pin_0)= self.client.PIN_dialog(msg)
-                if not is_PIN:
+                is_PIN= None
+                if self.client is not None:
+                    msg = f'Enter the PIN for your {self.card_type}:'
+                    (is_PIN, pin_0)= self.client.PIN_dialog(msg) #todo: use request?
+                if is_PIN is None:
                     raise RuntimeError(('Device cannot be unlocked without PIN code!'))
                 pin_0=list(pin_0)
             else:
@@ -1060,28 +1055,35 @@ class CardConnector:
                 self.set_pin(0, None) #reset cached PIN value
                 pin_left= (sw2 & ~0xc0)
                 msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-                self.client.request('show_error', msg)
+                if self.client is not None:
+                    self.client.request('show_error', msg)
             # wrong PIN (legacy before v0.11)    
             elif sw1==0x9c and sw2==0x02:
                 self.set_pin(0, None) #reset cached PIN value
                 (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
                 pin_left= d.get("PIN0_remaining_tries",-1)
                 msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-                self.client.request('show_error', msg)
+                if self.client is not None:
+                    self.client.request('show_error', msg)
             # blocked PIN
             elif sw1==0x9c and sw2==0x0c:
-                msg = (f"Too many failed attempts! Your card has been blocked! You need your PUK code to unblock it.")
-                self.client.request('show_error', msg)
-                raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
+                msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
+                if self.client is not None:
+                    self.client.request('show_error', msg)
+                raise RuntimeError(msg)
             # any other edge case
             else:
                 self.set_pin(0, None) #reset cached PIN value
                 msg = (f"Please check your card! \nUnexpected error sw12: {hex(sw1)} {hex(sw2)}")
-                self.client.request('show_error', msg)
+                if self.client is not None:
+                    self.client.request('show_error', msg)
                 return (response, sw1, sw2)     
                 
         #if not self.card_present:
-        self.client.request('show_error', 'No card found! Please insert card!')
+        if self.client is not None:
+            self.client.request('show_error', 'No card found! Please insert card!')
+        else:
+            raise RuntimeError('No card found! Please insert card!')
         return
             
     def set_pin(self, pin_nbr, pin):
@@ -1108,19 +1110,23 @@ class CardConnector:
             self.set_pin(pin_nbr, None) #reset cached PIN value
             pin_left= (sw2 & ~0xc0)
             msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-            self.client.request('show_error', msg)
+            if self.client is not None:
+                self.client.request('show_error', msg)
         # wrong PIN (legacy before v0.11)    
         elif sw1==0x9c and sw2==0x02: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
             (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
             pin_left= d.get("PIN0_remaining_tries",-1)
             msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-            self.client.request('show_error', msg)
+            if self.client is not None:
+                self.client.request('show_error', msg)
+            raise RuntimeError(msg)
         # blocked PIN
         elif sw1==0x9c and sw2==0x0c:
-            msg = ("Too many failed attempts! Your card has been blocked! You need your PUK code to unblock it.")
-            self.client.request('show_error', msg)
-            raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
+            msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
+            if self.client is not None:
+                self.client.request('show_error', msg)
+            raise RuntimeError(msg)
 	        
         return (response, sw1, sw2)      
 
@@ -1140,19 +1146,22 @@ class CardConnector:
             self.set_pin(pin_nbr, None) #reset cached PIN value
             pin_left= (sw2 & ~0xc0)
             msg = ("Wrong PUK! {} tries remaining!").format(pin_left)
-            self.client.request('show_error', msg)
+            if self.client is not None:
+                self.client.request('show_error', msg)
         # wrong PUK (legacy before v0.11)    
         elif sw1==0x9c and sw2==0x02: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
             (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
             pin_left= d.get("PUK0_remaining_tries",-1)
             msg = ("Wrong PUK! {} tries remaining!").format(pin_left)
-            self.client.request('show_error', msg)
+            if self.client is not None:
+                self.client.request('show_error', msg)
         # blocked PUK
         elif sw1==0x9c and sw2==0x0c:
-            msg = ("Too many failed attempts! Your card has been blocked!")
-            self.client.request('show_error', msg)
-            raise RuntimeError('Device blocked with error code:'+hex(sw1)+' '+hex(sw2))
+            msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
+            if self.client is not None:
+                self.client.request('show_error', msg)
+            raise RuntimeError(msg)
         
         return (response, sw1, sw2)
 
