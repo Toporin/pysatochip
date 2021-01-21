@@ -472,7 +472,8 @@ class CardDataParser:
         except UnicodeDecodeError as e:
             logger.warning("UnicodeDecodeError while decoding label header!")
             header_dict['label']=  str(bytes(header_dict['label_list']))
-        header_dict['header']=  response[0:(15+header_dict['label_size'])]
+        header_dict['header_list']=  response[0:(15+header_dict['label_size'])]
+        header_dict['header']=  bytes(header_dict['header_list']).hex()
         
         # logger.debug(f"++++++++++++++++++++++++++++++++")
         # logger.debug(f"Secret id: {header_dict['id']}")
@@ -502,7 +503,7 @@ class CardDataParser:
         res= log[5]*256+ log[6]
         
         return (ins, id1, id2, res)
-        
+
     #################################
     #                   PERSO PKI                 #        
     #################################    

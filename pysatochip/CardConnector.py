@@ -410,57 +410,57 @@ class CardConnector:
         
         return authentikey
     
-    # deprecated, use card_import_encrypted_secret() instead
-    def card_bip32_import_encrypted_seed(self, secret_dic):
-        '''Import an encrypted BIP32 masterseed exported from a SeedKeeper.
+    # # deprecated, use card_import_encrypted_secret() instead
+    # def card_bip32_import_encrypted_seed(self, secret_dic):
+        # '''Import an encrypted BIP32 masterseed exported from a SeedKeeper.
         
-        The masterseed is encrypted using a shared key generated using ECDH with the 2 devices authentikeys.
-         Before import can be done, the two device should be paired by importing the 
-         Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
-         and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().'''
-        logger.debug("In card_bip32_import_encrypted_seed")
+        # The masterseed is encrypted using a shared key generated using ECDH with the 2 devices authentikeys.
+         # Before import can be done, the two device should be paired by importing the 
+         # Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
+         # and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().'''
+        # logger.debug("In card_bip32_import_encrypted_seed")
         
-        cla= JCconstants.CardEdge_CLA
-        ins= 0xAC
-        p1= 0x00
-        p2= 0x00        
-        header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) # first 2 bytes are sid
-        iv= list(bytes.fromhex(secret_dic['iv']))
-        secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
-        hmac= list(bytes.fromhex(secret_dic['hmac']))
-        data= header + iv + [(len(secret_list)>>8), (len(secret_list)%256)] + secret_list + [len(hmac)] + hmac
-        lc=len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
-        response, sw1, sw2 = self.card_transmit(apdu)
-        if (sw1==0x90 and sw2==0x00):
-            pass 
-        elif (sw1==0x6d and sw2==0x00):
-            logger.error(f"Error during secret import: operation not supported by the card (0x6D00)")
-            raise CardError(f"Error during secret import: operation not supported by the card (0x6D00)")
-        elif (sw1==0x9C and sw2==0x17):
-            logger.error(f"Error during secret import: card is already seeded (0x9C17)")
-            raise CardError('Secure import failed: card is already seeded (0x9C17)!')
-        elif (sw1==0x9C and sw2==0x0F):
-            logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
-            raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
-        elif (sw1==0x9C and sw2==0x33):
-            logger.error(f"Error during secret import: wrong MAC (0x9C33)")
-            raise CardError('Secure import failed: wrong MAC (0x9C33)!')
-        elif (sw1==0x9C and sw2==0x34):
-            logger.error(f"Error during secret import: wrong fingerprint (0x9C34)")
-            raise CardError('Secure import failed: wrong fingerprint (0x9C34)!')
-        elif (sw1==0x9C and sw2==0x35):
-            logger.error(f"Error during secret import: no TrustedPubkey (0x9C35)")
-            raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
-        else:
-            logger.error(f"Error during secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+        # cla= JCconstants.CardEdge_CLA
+        # ins= 0xAC
+        # p1= 0x00
+        # p2= 0x00        
+        # header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) # first 2 bytes are sid
+        # iv= list(bytes.fromhex(secret_dic['iv']))
+        # secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
+        # hmac= list(bytes.fromhex(secret_dic['hmac']))
+        # data= header + iv + [(len(secret_list)>>8), (len(secret_list)%256)] + secret_list + [len(hmac)] + hmac
+        # lc=len(data)
+        # apdu=[cla, ins, p1, p2, lc]+data
+        # response, sw1, sw2 = self.card_transmit(apdu)
+        # if (sw1==0x90 and sw2==0x00):
+            # pass 
+        # elif (sw1==0x6d and sw2==0x00):
+            # logger.error(f"Error during secret import: operation not supported by the card (0x6D00)")
+            # raise CardError(f"Error during secret import: operation not supported by the card (0x6D00)")
+        # elif (sw1==0x9C and sw2==0x17):
+            # logger.error(f"Error during secret import: card is already seeded (0x9C17)")
+            # raise CardError('Secure import failed: card is already seeded (0x9C17)!')
+        # elif (sw1==0x9C and sw2==0x0F):
+            # logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
+            # raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
+        # elif (sw1==0x9C and sw2==0x33):
+            # logger.error(f"Error during secret import: wrong MAC (0x9C33)")
+            # raise CardError('Secure import failed: wrong MAC (0x9C33)!')
+        # elif (sw1==0x9C and sw2==0x34):
+            # logger.error(f"Error during secret import: wrong fingerprint (0x9C34)")
+            # raise CardError('Secure import failed: wrong fingerprint (0x9C34)!')
+        # elif (sw1==0x9C and sw2==0x35):
+            # logger.error(f"Error during secret import: no TrustedPubkey (0x9C35)")
+            # raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
+        # else:
+            # logger.error(f"Error during secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            # raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
          
-        authentikey= self.parser.parse_bip32_get_authentikey(response)
-        authentikey_hex= authentikey.get_public_key_bytes(True).hex()
-        logger.debug('authentikey_card= ' + authentikey_hex)
+        # authentikey= self.parser.parse_bip32_get_authentikey(response)
+        # authentikey_hex= authentikey.get_public_key_bytes(True).hex()
+        # logger.debug('authentikey_card= ' + authentikey_hex)
             
-        return authentikey
+        # return authentikey
     
     def card_import_encrypted_secret(self, secret_dic):
         '''Import an encrypted secret (BIP32 masterseed or 2FA secret) exported from a SeedKeeper.
@@ -1341,11 +1341,8 @@ class CardConnector:
         chunk_size=128;
         if (is_secure_import):
             secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
-            # secret_base64= secret_dic['secret_base64']
-            # secret_bytes= base64.decodebytes(secret_base64.encode('utf8'))
-            # secret_list= list(secret_bytes)
         else:
-            secret_list= secret_dic['secret']
+            secret_list= secret_dic['secret_list']
         secret_offset= 0
         secret_remaining= len(secret_list)
         while (secret_remaining>chunk_size):
@@ -1432,7 +1429,8 @@ class CardConnector:
         if (is_secure_export):
             iv=  response[-16:] #todo: parse also in parse_seedkeeper_header()?
             logger.debug("IV:"+ bytes(iv).hex())
-            secret_dict['iv']=iv
+            secret_dict['iv_list']=iv
+            secret_dict['iv']= bytes(iv).hex()
                 
         secret=[]
         p2= 0x02
@@ -1454,17 +1452,23 @@ class CardConnector:
                 sign= response[offset:(offset+sign_size)]
                 
                 # check signature
-                full_data=secret_dict['header']+secret
+                full_data=secret_dict['header_list']+secret
                 if (sign_size==20):
-                    secret_dict['hmac']=sign
+                    secret_dict['hmac_list']=sign
+                    secret_dict['hmac']=bytes(sign).hex()
                 else:
                     self.parser.verify_signature(full_data, sign, self.parser.authentikey)
-                    secret_dict['sign']=sign
-                secret_dict['full_data']= full_data
+                    secret_dict['sign_list']=sign
+                    secret_dict['sign']=bytes(sign).hex()
+                secret_dict['full_data_list']= full_data
+                secret_dict['full_data']= bytes(full_data).hex()
                 break
-        secret_dict['secret']= secret
-        secret_dict['secret_hex']= bytes(secret).hex()
-        logger.debug(f"Secret: {secret_dict['secret_hex']}")
+        secret_dict['secret_list']= secret
+        if is_secure_export:
+            secret_dict['secret_encrypted']= bytes(secret).hex()
+        else:
+            secret_dict['secret']= bytes(secret).hex()
+        #logger.debug(f"Secret: {secret_dict['secret']}")
         #TODO: parse secret depending to type for all possible cases
         
         # check fingerprint
@@ -1577,7 +1581,30 @@ class CardConnector:
             i+=1
             
         return (logs, nbtotal_logs, nbavail_logs)
-
+    
+    def make_header(self, secret_type, export_rights, label):
+        dic_type= {'BIP39 mnemonic':0x30, 'Electrum mnemonic':0x40, 'Masterseed':0x10, 'Secure import from json':0x00, 
+                                'Public Key':0x70, 'Authentikey from TrustStore':0x70, 'Password':0x90, 'Authentikey certificate':0xA0, '2FA secret':0xB0}
+        dic_export_rights={'Export in plaintext allowed':0x01 , 'Export encrypted only':0x02}
+        id=2*[0x00]
+        if type(secret_type) is str:
+            itype= dic_type[secret_type]
+        else:
+            itype= secret_type
+        origin= 0x00
+        if type(export_rights) is str:
+            export= dic_export_rights[export_rights]
+        else:
+            export= export_rights
+        export_counters=3*[0x00]
+        fingerprint= 4*[0x00]
+        rfu=2*[0x00]
+        label_size= len(label)
+        label_list= list(label.encode('utf8'))
+        header_list= id + [itype, origin, export] + export_counters + fingerprint + rfu + [label_size] + label_list
+        header_hex= bytes(header_list).hex()
+        return header_hex
+    
     #################################
     #                   PERSO PKI                 #        
     #################################    
