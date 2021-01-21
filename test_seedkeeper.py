@@ -16,8 +16,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Run with: python3 -m unittest -v test_seedkeeper.py
-
+#
 # For running these tests, you need a SeedKeeper inserted in a card reader, ideally non-initialized.
+# If the card is initialized, the PIN should be set to 123456 otherwise it will fail 
 
 import time
 import logging

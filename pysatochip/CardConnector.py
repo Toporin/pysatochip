@@ -285,8 +285,8 @@ class CardConnector:
             self.needs_secure_channel= d["needs_secure_channel"]= False
             
         else:
-            logger.warning(f"[card_get_status] unknown get-status() error! sw12={hex(sw1)} {hex(sw2)}")
-            #raise RuntimeError('Unknown get-status() error code:'+hex(sw1)+' '+hex(sw2))
+            logger.warning(f"Unknown error in get_status() (error code {hex(256*sw1+sw2)})")
+            #raise RuntimeError(f"Unknown error in get_status() (error code {hex(256*sw1+sw2)})")
             
         return (response, sw1, sw2, d)
     
@@ -507,8 +507,8 @@ class CardConnector:
             logger.error(f"Error during secret import: no TrustedPubkey (0x9C35)")
             raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
         else:
-            logger.error(f"Error during secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            logger.error(f"Error during secret import (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
         
         secret_type= header[0]
         if  secret_type==0x10:
@@ -580,8 +580,8 @@ class CardConnector:
             logger.info("card_bip32_get_authentikey(): Satochip is not initialized => Raising error!")
             raise UninitializedSeedError('Satochip is not initialized! You should create a new wallet!\n\n'+MSG_WARNING)
         else:
-            logger.warning(f"Unexpected error during authentikey export: {hex(sw1)} {hex(sw2)}")
-            raise UnexpectedSW12Error(f"Unexpected error during authentikey export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            logger.warning(f"Unexpected error during authentikey export (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during authentikey export (error code {hex(256*sw1+sw2)})")
 
     
     def card_reset_seed(self, pin, hmac=[]):
@@ -670,7 +670,7 @@ class CardConnector:
                 apdu[3]=apdu[3]&0x7f # reset the flag
             # other (unexpected) error
             if (sw1!=0x90) or (sw2!=0x00):
-                raise UnexpectedSW12Error('Unexpected error code SW12='+hex(sw1)+" "+hex(sw2))
+                raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})')
             # check for non-hardened child derivation optimization
             elif ( (response[32]&0x80)== 0x80):
                 logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
@@ -753,7 +753,7 @@ class CardConnector:
         
         # parse signature from response
         if (sw1!=0x90 or sw2!=0x00):
-            logger.warning("In card_sign_message(): error sw12="+hex(sw1)+" "+hex(sw2))#debugSatochip
+            logger.warning(f"Unexpected error in card_sign_message() (error code {hex(256*sw1+sw2)})") #debugSatochip
             compsig=b''
         else:
             # Prepend the message for signing as done inside the card!!
@@ -1074,7 +1074,7 @@ class CardConnector:
             # any other edge case
             else:
                 self.set_pin(0, None) #reset cached PIN value
-                msg = (f"Please check your card! \nUnexpected error sw12: {hex(sw1)} {hex(sw2)}")
+                msg = (f"Please check your card! Unexpected error (error code {hex(256*sw1+sw2)})")
                 if self.client is not None:
                     self.client.request('show_error', msg)
                 return (response, sw1, sw2)     
@@ -1334,7 +1334,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1!=0x90 or sw2!=0x00):
             logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
             
         # OP_PROCESS
         p2= 0x02
@@ -1351,8 +1351,8 @@ class CardConnector:
             apdu=[cla, ins, p1, p2, lc]+data
             response, sw1, sw2 = self.card_transmit(apdu)
             if (sw1!=0x90 or sw2!=0x00):
-                logger.error(f"Error during secret import - OP_PROCESS: {(sw1*256+sw2):0>4X}")
-                raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{sw1} sw2:{sw2}")
+                logger.error(f"Error during secret import - OP_PROCESS (error code {hex(256*sw1+sw2)})")
+                raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
             secret_offset+=chunk_size
             secret_remaining-=chunk_size
         
@@ -1366,11 +1366,11 @@ class CardConnector:
         apdu=[cla, ins, p1, p2, lc]+data
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1==0x9C and sw2==0x33):
-            logger.error(f"Error during secret import - OP_FINAL: wrong mac {(sw1*256+sw2):0>4X}")
-            raise SeedKeeperError('Secure import failed: wrong MAC value!')
+            logger.error(f"Error during secret import - OP_FINAL: wrong mac (error code {hex(256*sw1+sw2)})")
+            raise SeedKeeperError(f"Error during secret import: wrong mac (error code {hex(256*sw1+sw2)})")
         elif (sw1!=0x90 or sw2!=0x00):
-            logger.error(f"Error during secret import - OP_FINAL: {(sw1*256+sw2):0>4X}")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{sw1} sw2:{sw2}")
+            logger.error(f"Error during secret import - OP_FINAL (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
         secret_offset+=chunk_size
         secret_remaining=0
         
@@ -1420,8 +1420,8 @@ class CardConnector:
             #TODO: try again?
             raise SeedKeeperError("Export failed: lock error - try again")
         else:
-            logger.warning(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
-            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
             
         # parse header
         secret_dict= self.parser.parse_seedkeeper_header(response)
@@ -1511,8 +1511,8 @@ class CardConnector:
             logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
-            logger.warning(f"Unexpected error during object listing: {sw1} {sw2}")
-            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")
+            logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
             
         return headers
 
@@ -1545,8 +1545,8 @@ class CardConnector:
             logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
-            logger.warning(f"Unexpected error during object listing: {sw1} {sw2}")
-            raise UnexpectedSW12Error(f"Unexpected error: sw1:{sw1} sw2:{sw2}")    
+            logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")    
             
         #next logs
         p2= 0x02
@@ -1622,8 +1622,8 @@ class CardConnector:
             logger.error(f"Error during personalization pubkey export: command unsupported(0x6D00")
             raise CardError(f"Error during personalization pubkey export: command unsupported (0x6D00)")
         else: 
-            logger.error(f"Error during personalization pubkey export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-            raise UnexpectedSW12Error(f"Unexpected error during personalization pubkey export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            logger.error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
         return response
     
     def card_export_perso_certificate(self):
@@ -1645,8 +1645,8 @@ class CardConnector:
             logger.error(f"Error during personalization certificate export: no card present(0x0000)")
             raise CardNotPresentError(f"Error during personalization certificate export: no card present (0x0000)")
         else: 
-            logger.error(f"Error during personalization certificate export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-            raise UnexpectedSW12Error(f"Unexpected error during personalization certificate export: sw1:{hex(sw1)} sw2:{hex(sw2)}")
+            logger.error(f"Error during personalization certificate export: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error during personalization certificate export: (error code {hex(256*sw1+sw2)})")
         
         certificate_size= (response[0] & 0xFF)*256 + (response[1] & 0xFF)
         if (certificate_size==0):
