@@ -412,7 +412,7 @@ class CardDataParser:
             if ls>=(i+1):
                 sigout[64-i]= tmp;
             else:
-                sigout[64-i]=0; # TOCHECK: should be 64 not 32??
+                sigout[64-i]=0; 
         # 1 byte header
         if recid>3 or recid<0:
             raise ValueError("Wrong recid value")

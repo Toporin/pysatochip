@@ -307,6 +307,7 @@ class CardConnector:
         return (response, sw1, sw2, d)
     
     def card_get_label(self):
+    
         logger.debug("In card_get_label")
         cla= JCconstants.CardEdge_CLA
         ins= 0x3D
@@ -397,6 +398,19 @@ class CardConnector:
     ###########################################
 
     def card_bip32_import_seed(self, seed):
+        ''' Import a seed into the device
+        
+        Parameters: 
+        seed (str | bytes | list): the seed as a hex_string or bytes or list of int
+
+        Returns: 
+        authentikey: ECPubkey object that identifies the  device
+        '''
+        if type(seed) is str:
+            seed= list(bytes.fromhex(seed))
+        elif type(seed) is bytes:
+            seed= list(seed)
+        
         logger.debug("In card_bip32_import_seed")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_BIP32_IMPORT_SEED
@@ -431,65 +445,20 @@ class CardConnector:
         
         return authentikey
     
-    # # deprecated, use card_import_encrypted_secret() instead
-    # def card_bip32_import_encrypted_seed(self, secret_dic):
-        # '''Import an encrypted BIP32 masterseed exported from a SeedKeeper.
-        
-        # The masterseed is encrypted using a shared key generated using ECDH with the 2 devices authentikeys.
-         # Before import can be done, the two device should be paired by importing the 
-         # Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
-         # and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().'''
-        # logger.debug("In card_bip32_import_encrypted_seed")
-        
-        # cla= JCconstants.CardEdge_CLA
-        # ins= 0xAC
-        # p1= 0x00
-        # p2= 0x00        
-        # header= list(bytes.fromhex(secret_dic['header']))[2:(2+12)]  #header= list(bytes.fromhex(secret_dic['header'][4:])) # first 2 bytes are sid
-        # iv= list(bytes.fromhex(secret_dic['iv']))
-        # secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
-        # hmac= list(bytes.fromhex(secret_dic['hmac']))
-        # data= header + iv + [(len(secret_list)>>8), (len(secret_list)%256)] + secret_list + [len(hmac)] + hmac
-        # lc=len(data)
-        # apdu=[cla, ins, p1, p2, lc]+data
-        # response, sw1, sw2 = self.card_transmit(apdu)
-        # if (sw1==0x90 and sw2==0x00):
-            # pass 
-        # elif (sw1==0x6d and sw2==0x00):
-            # logger.error(f"Error during secret import: operation not supported by the card (0x6D00)")
-            # raise CardError(f"Error during secret import: operation not supported by the card (0x6D00)")
-        # elif (sw1==0x9C and sw2==0x17):
-            # logger.error(f"Error during secret import: card is already seeded (0x9C17)")
-            # raise CardError('Secure import failed: card is already seeded (0x9C17)!')
-        # elif (sw1==0x9C and sw2==0x0F):
-            # logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
-            # raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
-        # elif (sw1==0x9C and sw2==0x33):
-            # logger.error(f"Error during secret import: wrong MAC (0x9C33)")
-            # raise CardError('Secure import failed: wrong MAC (0x9C33)!')
-        # elif (sw1==0x9C and sw2==0x34):
-            # logger.error(f"Error during secret import: wrong fingerprint (0x9C34)")
-            # raise CardError('Secure import failed: wrong fingerprint (0x9C34)!')
-        # elif (sw1==0x9C and sw2==0x35):
-            # logger.error(f"Error during secret import: no TrustedPubkey (0x9C35)")
-            # raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
-        # else:
-            # logger.error(f"Error during secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-            # raise UnexpectedSW12Error(f"Unexpected error during secure secret import: sw1:{hex(sw1)} sw2:{hex(sw2)}")
-         
-        # authentikey= self.parser.parse_bip32_get_authentikey(response)
-        # authentikey_hex= authentikey.get_public_key_bytes(True).hex()
-        # logger.debug('authentikey_card= ' + authentikey_hex)
-            
-        # return authentikey
-    
     def card_import_encrypted_secret(self, secret_dic):
         '''Import an encrypted secret (BIP32 masterseed or 2FA secret) exported from a SeedKeeper.
         
         The secret is encrypted using a shared key generated using ECDH with the 2 devices authentikeys.
-         Before import can be done, the two device should be paired by importing the 
-         Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
-         and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().'''
+        Before import can be done, the two device should be paired by importing the 
+        Satochip-authentikey in the SeedKeeper with seedkeeper_import_secret(), 
+        and the SeedKeeper-authentikey in the Satochip with card_import_trusted_pubkey().
+         
+        Parameters: 
+        secret_dic: a dictionnary that defines the secret, as returned by seedkeeper_export_secret()
+
+        Returns: 
+        authentikey: ECPubkey object that identifies the  device
+        '''
         logger.debug("In card_import_encrypted_secret")
         
         cla= JCconstants.CardEdge_CLA
@@ -541,12 +510,24 @@ class CardConnector:
             return None
             
     def card_import_trusted_pubkey(self, pubkey_list):
+        ''' Import a trusted ec pubkey into the device. This pubkey will be used for the secure import of a secret
+        
+        Parameters: 
+        pubkey_list: the pubkey in uncompressed form (65 bytes) as a hex_string or bytes or list of int
+
+        Returns: 
+        pubkey_hex: the pubkey as a hex string (65*2 hex chars)
+        '''
         logger.debug("In card_import_trusted_pubkey")
+        if type(pubkey_list) is str:
+            pubkey_list= list(bytes.fromhex(pubkey_list))
+        elif type(pubkey_list) is bytes:
+            pubkey_list= list(pubkey_list)
+        
         cla= JCconstants.CardEdge_CLA
         ins= 0xAA
         p1= 0x00
         p2= 0x00    
-        #pubkey_list= list(bytes.fromhex(pubkey_hex))
         pubkey_size= len(pubkey_list)
         if (pubkey_size !=65):
             raise RuntimeError(f'Error during trusted pubkey import: wrong pubkey size, expected 65 but received {pubkey_size}')
@@ -568,6 +549,11 @@ class CardConnector:
         return pubkey_hex
         
     def card_export_trusted_pubkey(self):
+        ''' Export the trusted ec pubkey from the device. This pubkey is used for the secure import of a secret
+        
+        Returns: 
+        pubkey_hex: the pubkey as a hex string (65*2 hex chars)
+        '''
         logger.debug("In card_export_trusted_pubkey")
         cla= JCconstants.CardEdge_CLA
         ins= 0xAB
@@ -583,7 +569,15 @@ class CardConnector:
         pubkey_hex=self.parser.get_trusted_pubkey(response)
         return pubkey_hex
     
-    def card_export_authentikey(self):
+    def card_export_authentikey(self):        
+        ''' Export the device authentikey.
+        
+        The authentikey identifies uniquely the device and is also used for setting a
+        secure channel when doing a secure import with card_import_encrypted_secret().
+        
+        Returns: 
+        authentikey: ECPubkey object that identifies the  device
+        '''
         logger.debug("In card_export_authentikey")
         cla= JCconstants.CardEdge_CLA
         ins= 0xAD
@@ -606,7 +600,26 @@ class CardConnector:
 
     
     def card_reset_seed(self, pin, hmac=[]):
+        ''' Reset the seed
+        
+        Parameters: 
+        pin  (hex-string | bytes | list): the pin required to unlock the device
+        hmac (hex-string | bytes | list): the 20-byte code required if 2FA is enabled
+        
+        Returns: 
+        (response, sw1, sw2): (list, int, int)
+        '''
         logger.debug("In card_reset_seed")
+        if type(pin) is str:
+            pin= list(pin.encode('utf-8'))
+        elif type(pin) is bytes:
+            seed= list(seed)
+        
+        if type(hmac) is str:
+            hmac= list(bytes.fromhex(hmac))
+        elif type(hmac) is bytes:
+            hmac= list(hmac)
+        
         cla= JCconstants.CardEdge_CLA
         ins= 0x77
         p1= len(pin)
@@ -620,6 +633,13 @@ class CardConnector:
         return (response, sw1, sw2)
 
     def card_bip32_get_authentikey(self):
+        ''' Return the authentikey      
+        
+        Compared to card_export_authentikey(), this method raise UninitializedSeedError if no seed is configured in the device
+        
+        Returns: 
+        authentikey: an ECPubkey
+        '''
         logger.debug("In card_bip32_get_authentikey")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_BIP32_GET_AUTHENTIKEY
@@ -662,8 +682,7 @@ class CardConnector:
         return authentikey
     
     def card_bip32_get_extendedkey(self, path):
-        ''' 
-        Get the BIP32 extended key for given path
+        ''' Get the BIP32 extended key for given path
         
         Parameters: 
         path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
@@ -719,6 +738,16 @@ class CardConnector:
                 return (key, chaincode)
 
     def card_bip32_get_xpub(self, path, xtype, is_mainnet):
+        ''' Get the BIP32 xpub for given path.
+        
+        Parameters: 
+        path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
+        xtype (str): the type of transaction such as  'standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh'
+        is_mainnet (bool): is mainnet or testnet 
+        
+        Returns: 
+        xpub (str): the corresponding xpub value
+        '''
         assert xtype in SUPPORTED_XTYPES
         
         # path is of the form 44'/0'/1'
@@ -747,6 +776,23 @@ class CardConnector:
     ###########################################
     
     def card_sign_message(self, keynbr, pubkey, message, hmac=b'', altcoin=None):
+        ''' Sign the message with the device
+        
+        Message is prepended with a specific header as described here:
+        https://bitcoin.stackexchange.com/questions/77324/how-are-bitcoin-signed-messages-generated
+        
+        Parameters: 
+        keynbr (int): the key to use (0xFF for bip32 key)
+        pubkey (ECPubkey): the pubkey used for signing; this is used for key recovery
+        message (str | bytes): the message to sign
+        hmac: the 20-byte hmac code required if 2FA is enabled
+        altcoin (str | bytes): for altcoin signing
+        
+        Returns: 
+        (response, sw1, sw2, compsig): (list, int, int, bytes)
+        compsig is the signature in  compact 65-byte format 
+        (https://bitcoin.stackexchange.com/questions/12554/why-the-signature-is-always-65-13232-bytes-long)
+        '''
         logger.debug("In card_sign_message")
         if (type(message)==str):
             message = message.encode('utf8')
@@ -816,26 +862,18 @@ class CardConnector:
                 
         return (response, sw1, sw2, compsig)
 
-    # This method was deprecated since it does the same as the more generic card_sign_message()
-    # This allows to simplify code, facilitate maintenance and reduce surface.
-    # def card_sign_short_message(self, keynbr, message, hmac=b''):
-        # if (type(message)==str):
-            # message = message.encode('utf8')
-
-        # # for message less than one chunk in size
-        # cla= JCconstants.CardEdge_CLA
-        # ins= JCconstants.INS_SIGN_SHORT_MESSAGE
-        # p1= keynbr # oxff=>BIP32 otherwise STD
-        # p2= 0x00
-        # lc= message.length+2+len(hmac)
-        # apdu= [cla, ins, p1, p2, lc]
-        # apdu+= [(message.length>>8 & 0xFF), (message.length & 0xFF)]
-        # apdu+= message+ hmac
-        # # send apdu
-        # response, sw1, sw2 = self.card_transmit(apdu)
-        # return (response, sw1, sw2)
-
-    def card_parse_transaction(self, transaction, is_segwit=False):
+    def card_parse_transaction(self, transaction: bytes, is_segwit=False):
+        ''' Parse a transaction to be signed by the device
+        
+        Parameters: 
+        transaction (bytes): the transaction to parse
+        is_segwit (bool)
+        
+        Returns: 
+        (response, sw1, sw2, tx_hash, needs_2fa)
+        tx_hash (list): hash as computed by the device
+        needs_2FA (bool): whether 2FA is required
+        '''
         logger.debug("In card_parse_transaction")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_PARSE_TRANSACTION
@@ -872,6 +910,17 @@ class CardConnector:
         return (response, sw1, sw2, tx_hash, needs_2fa)
 
     def card_sign_transaction(self, keynbr, txhash, chalresponse):
+        ''' Sign the transaction in the device
+        
+        Parameters: 
+        keynbr (int): the key to use (0xFF for bip32 key)
+        txhash (list): the transaction hash as returned by the device
+        chalresponse (list): the hmac code if 2FA is enabled
+        
+        Returns: 
+        (response, sw1, sw2)
+        response (list): the signature in DER format
+        '''
         logger.debug("In card_sign_transaction")
         #if (type(chalresponse)==str):
         #    chalresponse = list(bytes.fromhex(chalresponse))
@@ -896,6 +945,17 @@ class CardConnector:
         return (response, sw1, sw2)
     
     def card_sign_transaction_hash(self, keynbr, txhash, chalresponse):
+        ''' Sign the transaction hash in the device
+        
+        Parameters: 
+        keynbr (int): the key to use (0xFF for bip32 key)
+        txhash (list): the transaction hash 
+        chalresponse (list): the hmac code if 2FA is enabled
+        
+        Returns: 
+        (response, sw1, sw2)
+        response (list): the signature in DER format
+        '''
         logger.debug("In card_sign_transaction_hash")
         #if (type(chalresponse)==str):
         #    chalresponse = list(bytes.fromhex(chalresponse))
@@ -924,6 +984,20 @@ class CardConnector:
     ###########################################
      
     def card_set_2FA_key(self, hmacsha160_key, amount_limit):
+        ''' Enable and import 2FA in the device
+        
+        Parameters: 
+        hmacsha160_key (bytes | list): the 20-bytes secret
+        amount_limit (int): the amount 
+        
+        Returns: 
+        (response, sw1, sw2)
+        '''
+        if type(hmacsha160_key) is str:
+            hmacsha160_key= list(bytes.fromhex(hmacsha160_key))
+        elif type(hmacsha160_key) is bytes:
+            hmacsha160_key= list(hmacsha160_key)
+            
         logger.debug("In card_set_2FA_key")
         cla= JCconstants.CardEdge_CLA
         ins= 0x79
@@ -943,7 +1017,20 @@ class CardConnector:
         return (response, sw1, sw2)
 
     def card_reset_2FA_key(self, chalresponse):
+        ''' Disable 2FA.
+        
+        Parameters: 
+        chalresponse (list | bytes | hex_str): the 20-bytes code to confirm
+        
+        Returns: 
+        (response, sw1, sw2)
+        '''
         logger.debug("In card_reset_2FA_key")
+        if type(chalresponse) is str:
+            chalresponse= list(bytes.fromhex(chalresponse))
+        elif type(chalresponse) is bytes:
+            chalresponse= list(chalresponse)
+        
         cla= JCconstants.CardEdge_CLA
         ins= 0x78
         p1= 0x00
@@ -1752,12 +1839,11 @@ class CardConnector:
         return verif;
     
     
-    
-
     #################################
     #                     HELPERS                 #        
     ################################# 
     
+    #deprecated
     def get_authentikey_from_masterseed(self, masterseed):
         # compute authentikey locally from masterseed
         # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', masterseed)
@@ -1782,20 +1868,6 @@ class UninitializedSeedError(Exception):
 class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
     pass
-    
-# TODO: remove    
-# class SeedKeeperExportNotAllowedError(Exception):
-    # """Raised when trying to export a secret that cannot be exported from a SeedKeeper"""
-    # pass    
-
-# class SeedKeeperObjectNotFoundError(Exception):
-    # """Raised when trying to export a non-existent secret"""
-    # pass   
-    
-# class SeedKeeperLockError(Exception):
-    # """Raised when lock error is raised by the SeedKeeper"""
-    # pass   
-    
 class CardError(Exception):
     """Raised when the device returns an error code"""
     pass
