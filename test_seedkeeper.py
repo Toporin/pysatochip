@@ -22,7 +22,6 @@
 
 import time
 import logging
-import random
 import unittest
 from os import urandom
 
@@ -31,16 +30,7 @@ from mnemonic import Mnemonic
 from pysatochip.CardConnector import CardConnector, UninitializedSeedError, SeedKeeperError
 from pysatochip.JCconstants import JCconstants
 from pysatochip.Satochip2FA import Satochip2FA
-from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-
-# try: 
-    # from Client import Client
-    # from handler import HandlerTxt, HandlerSimpleGUI
-# except Exception as e:
-    # print('ImportError: '+repr(e))
-    # from seedkeeper.Client import Client
-    # from seedkeeper.handler import HandlerTxt, HandlerSimpleGUI
-
+from pysatochip.version import SEEDKEEPER_PROTOCOL_VERSION
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
 logger = logging.getLogger(__name__)
@@ -81,8 +71,7 @@ class SeedKeeperTest(unittest.TestCase):
             
             # check version
             if  (cls.cc.setup_done):
-                #v_supported= CardConnector.SATOCHIP_PROTOCOL_VERSION 
-                v_supported= SATOCHIP_PROTOCOL_VERSION 
+                v_supported= SEEDKEEPER_PROTOCOL_VERSION 
                 v_applet= d["protocol_version"] 
                 logger.info(f"SeedKeeper version={v_applet} Electrum supported version= {v_supported}") #debugSatochip
                 if (cls.cc.needs_secure_channel):

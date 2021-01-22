@@ -11,7 +11,7 @@ from .CardDataParser import CardDataParser
 from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
-from .util import msg_magic, sha256d
+from .util import msg_magic, sha256d, hash_160, EncodeBase58Check
 from .version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION, PYSATOCHIP_VERSION
 from .certificate_validator import CertificateValidator
 
@@ -40,7 +40,23 @@ MSG_USE_2FA= ("Do you want to use 2-Factor-Authentication (2FA)?\n\n"
                "by scanning the qr-code on the next screen. \n"
                "Warning: be sure to backup a copy of the qr-code in a safe place, \n"
                "in case you have to reinstall the app!")
-               
+
+SUPPORTED_XTYPES = ('standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh')
+XPUB_HEADERS_MAINNET = {
+        'standard':    '0488b21e',  # xpub
+        'p2wpkh-p2sh': '049d7cb2',  # ypub
+        'p2wsh-p2sh':  '0295b43f',  # Ypub
+        'p2wpkh':      '04b24746',  # zpub
+        'p2wsh':       '02aa7ed3',  # Zpub
+    }
+XPUB_HEADERS_TESTNET = {
+        'standard':    '043587cf',  # tpub
+        'p2wpkh-p2sh': '044a5262',  # upub
+        'p2wsh-p2sh':  '024289ef',  # Upub
+        'p2wpkh':      '045f1cf6',  # vpub
+        'p2wsh':       '02575483',  # Vpub
+    }
+
 # simple observer that will print on the console the card connection events.
 class LogCardConnectionObserver(CardConnectionObserver):
     def update( self, cardconnection, ccevent ):
@@ -406,7 +422,12 @@ class CardConnector:
                 # raise RuntimeError('Authentikey mismatch: local value differs from card value!')
                 
             self.is_seeded= True
-        #todo: check sw12 error codes (0x9C17...)
+        elif (sw1==0x9C and sw2==0x17):
+            logger.error(f"Error during secret import: card is already seeded (0x9C17)")
+            raise CardError('Secure import failed: card is already seeded (0x9C17)!')
+        elif (sw1==0x9C and sw2==0x0F):
+            logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
+            raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
         
         return authentikey
     
@@ -621,9 +642,9 @@ class CardConnector:
             self.is_seeded=True
         return authentikey
         
-    ''' Allows to compute coordy of authentikey externally to optimize computation time-out
-        coordy value is verified by the chip before being accepted '''
     def card_bip32_set_authentikey_pubkey(self, response):
+        ''' Allows to compute coordy of authentikey externally to optimize computation time-out
+        coordy value is verified by the chip before being accepted '''
         logger.debug("In card_bip32_set_authentikey_pubkey")
         cla= JCconstants.CardEdge_CLA
         ins= 0x75
@@ -639,9 +660,18 @@ class CardConnector:
             apdu=[cla, ins, p1, p2, lc]+data
             (response, sw1, sw2) = self.card_transmit(apdu)
         return authentikey
-
-    def card_bip32_get_extendedkey(self, path):
     
+    def card_bip32_get_extendedkey(self, path):
+        ''' 
+        Get the BIP32 extended key for given path
+        
+        Parameters: 
+        path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
+
+        Returns: 
+        pubkey: ECPubkey object
+        chaincode: bytearray
+        '''
         if (type(path)==str):
             (depth, path)= self.parser.bip32path2bytes(path)
     
@@ -688,6 +718,30 @@ class CardConnector:
                 (key, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
                 return (key, chaincode)
 
+    def card_bip32_get_xpub(self, path, xtype, is_mainnet):
+        assert xtype in SUPPORTED_XTYPES
+        
+        # path is of the form 44'/0'/1'
+        logger.info(f"card_bip32_get_xpub(): path={str(path)}")#debugSatochip
+        if (type(path)==str):
+            (depth, bytepath)= self.parser.bip32path2bytes(path)
+        
+        (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath)
+        if depth == 0: #masterkey
+            fingerprint= bytes([0,0,0,0])
+            child_number= bytes([0,0,0,0])
+        else: #get parent info
+            (parentkey, parentchaincode)= self.card_bip32_get_extendedkey(bytepath[0:-4])
+            fingerprint= hash_160(parentkey.get_public_key_bytes(compressed=True))[0:4]
+            child_number= bytepath[-4:]
+        
+        xpub_header= XPUB_HEADERS_MAINNET[xtype] if is_mainnet else XPUB_HEADERS_TESTNET[xtype]
+        xpub = bytes.fromhex(xpub_header) + bytes([depth]) + fingerprint + child_number + childchaincode + childkey.get_public_key_bytes(compressed=True)
+        assert(len(xpub)==78)
+        xpub= EncodeBase58Check(xpub)
+        logger.info(f"card_bip32_get_xpub(): xpub={str(xpub)}")#debugSatochip
+        return xpub
+       
     ###########################################
     #                      Signing commands                      #
     ###########################################
