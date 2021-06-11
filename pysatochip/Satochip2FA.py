@@ -31,13 +31,20 @@ import hashlib
 import base64
 import time
 import logging 
+import certifi
+import ssl
 from xmlrpc.client import ServerProxy
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 #TODO allows user to select his own server...
-server = ServerProxy('https://cosigner.electrum.org/', allow_none=True)
+ca_path = certifi.where()
+ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_path)
+server = ServerProxy('https://cosigner.electrum.org/', allow_none=True, context=ssl_context)
+#server = ServerProxy('https://cosigner.satochip.io', allow_none=True, context=ssl_context)
+#server = ServerProxy('http://sync.imaginary.cash:8081', allow_none=True, context=ssl_context)
+#server = ServerProxy('https://cosigner.satochip.io:81', allow_none=True, context=ssl_context) # wrong port to generate timeout error
 
 class Satochip2FA:
     def __init__(self, loglevel= logging.INFO):
