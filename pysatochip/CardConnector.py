@@ -1067,12 +1067,18 @@ class CardConnector:
             msg= msg+ [padsize]*padsize
             # send apdu
             (response, sw1, sw2) = self.card_transmit(apdu)
-            # extract IV & id_2FA
-            IV= response[0:16]
-            id_2FA= response[16:36]
-            msg_out=IV
-            # id_2FA is 20 bytes, should be 32 => use sha256
-            id_2FA= hashlib.sha256(bytes(id_2FA)).hexdigest()
+            if sw1==0x90 and sw2==0x00:
+                # extract IV & id_2FA
+                IV= response[0:16]
+                id_2FA= response[16:36]
+                msg_out=IV
+                # id_2FA is 20 bytes, should be 32 => use sha256
+                from hashlib import sha256
+                id_2FA= sha256(bytes(id_2FA)).hexdigest()
+            elif sw1==0x9c and sw2==0x19:
+                raise RuntimeError(f"Error: 2FA is not enabled (error code: {hex(256*sw1+sw2)}")
+            else:
+                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
         else:
             p1= 0x01
             lc= 0x10
@@ -1085,7 +1091,13 @@ class CardConnector:
                 logger.info('Padding error!')
             # send apdu
             (response, sw1, sw2) = self.card_transmit(apdu)
-
+            if sw1==0x90 and sw2==0x00:
+                pass
+            elif sw1==0x9c and sw2==0x19:
+                raise RuntimeError(f"Error: 2FA is not enabled (error code: {hex(256*sw1+sw2)}")
+            else:
+                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
+            
         # msg is cut in chunks and each chunk is sent to the card for encryption/decryption
         # given the protocol overhead, size of each chunk is limited in size:
         # without secure channel, an APDU command is max 255 byte, so chunk<=255-(5+2)
