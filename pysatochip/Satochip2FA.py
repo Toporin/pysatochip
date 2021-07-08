@@ -38,10 +38,17 @@ from xmlrpc.client import ServerProxy
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-#TODO allows user to select his own server...
+# User can select his 2FA server from a list
+# User should select the same server on the 2FA app
+SERVER_LIST= [
+    'https://cosigner.electrum.org',
+    'https://cosigner.satochip.io', 
+    'http://sync.imaginary.cash:8081', 
+]
+
 ca_path = certifi.where()
 ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_path)
-server = ServerProxy('https://cosigner.electrum.org/', allow_none=True, context=ssl_context)
+#server = ServerProxy('https://cosigner.electrum.org', allow_none=True, context=ssl_context)
 #server = ServerProxy('https://cosigner.satochip.io', allow_none=True, context=ssl_context)
 #server = ServerProxy('http://sync.imaginary.cash:8081', allow_none=True, context=ssl_context)
 #server = ServerProxy('https://cosigner.satochip.io:81', allow_none=True, context=ssl_context) # wrong port to generate timeout error
@@ -52,11 +59,16 @@ class Satochip2FA:
     
     # send the challenge and get the reply 
     @classmethod
-    def do_challenge_response(cls, d):
+    def do_challenge_response(cls, d, server_name= SERVER_LIST[0]):
         logger.debug("In do_challenge_response()")
         id_2FA= d['id_2FA']
         msg= d['msg_encrypt']        
         replyhash= hashlib.sha256(id_2FA.encode('utf-8')).hexdigest()
+        
+        # set server
+        if server_name not in SERVER_LIST:
+            server_name= SERVER_LIST[0]
+        server = ServerProxy(server_name, allow_none=True, context=ssl_context)
         
         #purge server from old messages then sends message
         server.delete(id_2FA)

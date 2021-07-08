@@ -24,8 +24,9 @@ SEEDKEEPER_PROTOCOL_VERSION= (SEEDKEEPER_PROTOCOL_MAJOR_VERSION<<8)+SEEDKEEPER_P
 # v0.11.3: add support for altcoin message signing in CardConnector.card_sign_message()
 # v0.11.4: minor improvements & more error checks
 # v0.12.1: add SeedKeeper support
+# v0.12.2: add list of 2FA servers to select
 # TODO: include SeedKeeper version
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 12
-PYSATOCHIP_REVISION= 1
+PYSATOCHIP_REVISION= 2
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
