@@ -18,8 +18,11 @@
  * limitations under the License.
 """
 import logging 
+import base64
 from hashlib import sha256
 from struct import pack, unpack
+from ecdsa.curves import SECP256k1
+from ecdsa.util import sigdecode_der
 
 from .ecc import ECPubkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 
@@ -295,9 +298,58 @@ class CardDataParser:
 
         if recid == -1:
             raise ValueError("Unable to recover public key from signature")
-
+        
+        logger.debug("Signature verified!")
         return pubkey
 
+    #######
+    def verify_signature(self, data, sig, authentikey):
+        logger.debug("In verify_signature")
+        data= bytearray(data)
+        sig= bytearray(sig)
+
+        digest= sha256()
+        digest.update(data)
+        hash=digest.digest()
+
+        recid=-1
+        for id in range(4):
+            compsig=self.parse_to_compact_sig(sig, id, compressed=True)
+            # remove header byte
+            compsig= compsig[1:]
+
+            try:
+                pk = ECPubkey.from_sig_string(compsig, id, hash)
+            except InvalidECPointException:
+                continue
+            
+            if pk== authentikey:
+                recid=id
+                break
+            
+        if recid == -1:
+            raise ValueError("Unable to recover authentikey from signature")
+
+        return pk
+    
+    def get_trusted_pubkey(self, response):
+        pubkey_size= response[0]*256+response[1]
+        if (pubkey_size !=65):
+            raise RuntimeError(f'Error while recovering trusted pubkey: wrong pubkey size, expected 65 but received {pubkey_size}')
+        data= response[0:(2+pubkey_size)]
+        sig_size= response[2+pubkey_size]*256 + response[2+pubkey_size+1] 
+        sig= response[(2+pubkey_size+2):(2+pubkey_size+2+sig_size)]
+        
+        pubkey_hex= bytes(response[2:2+pubkey_size]).hex()
+        logger.debug(f"Verifying sig for pubkey {pubkey_hex} using authentikey {self.authentikey.get_public_key_bytes(compressed=False).hex()}")
+        
+        try:
+            self.verify_signature(data, sig, self.authentikey)
+        except Exception as ex:
+            logger.error('Exception in get_trusted_pubkey: ' + str(ex))
+            
+        return pubkey_hex
+    
     ##############
     def parse_parse_transaction(self, response):
         '''Satochip returns: [(hash_size+2)(2b) | tx_hash(32b) | need2fa(2b) | sig_size(2b) | sig(sig_size) | txcontext]'''
@@ -360,7 +412,7 @@ class CardDataParser:
             if ls>=(i+1):
                 sigout[64-i]= tmp;
             else:
-                sigout[64-i]=0; # TOCHECK: should be 64 not 32??
+                sigout[64-i]=0; 
         # 1 byte header
         if recid>3 or recid<0:
             raise ValueError("Wrong recid value")
@@ -386,5 +438,110 @@ class CardDataParser:
         # v= compsig[0]-27 if (compsig[0]<=28)  else compsig[0]-27-4 # recid is 0 or 1
         # return (r,s,v)
     
+    #################################
+    #                  SEEDKEEPER              #        
+    #################################   
     
+    def parse_seedkeeper_header(self, response):
+        # parse header
+        
+        header_dict={}
+        if ( len(response) <12 ):
+            logger.error(f"SeedKeeper error: header response too short: {len(response)}")
+            return header_dict
+        
+        header_dict['id']= (response[0]<<8) +response[1]
+        header_dict['type']= response[2]
+        header_dict['origin']= response[3]
+        header_dict['export_rights']= response[4]
+        header_dict['export_nbplain']=  response[5]
+        header_dict['export_nbsecure']=  response[6]
+        header_dict['export_counter']=  response[7]
+        header_dict['fingerprint_list']= response[8:12]
+        header_dict['fingerprint']= bytes(header_dict['fingerprint_list']).hex()
+        header_dict['rfu1']= response[12]
+        header_dict['rfu2']= response[13]
+        header_dict['label_size']= response[14]
+        if ( len(response) <(15+header_dict['label_size'])):
+            logger.error(f"SeedKeeper error: header response too short: {len(response)}")
+            return header_dict
+            
+        header_dict['label_list']= response[15:(15+header_dict['label_size'])]
+        try:
+            header_dict['label']=  bytes(header_dict['label_list']).decode("utf-8") 
+        except UnicodeDecodeError as e:
+            logger.warning("UnicodeDecodeError while decoding label header!")
+            header_dict['label']=  str(bytes(header_dict['label_list']))
+        header_dict['header_list']=  response[0:(15+header_dict['label_size'])]
+        header_dict['header']=  bytes(header_dict['header_list']).hex()
+        
+        # logger.debug(f"++++++++++++++++++++++++++++++++")
+        # logger.debug(f"Secret id: {header_dict['id']}")
+        # logger.debug(f"Secret type: {header_dict['type']}")
+        # logger.debug(f"Secret export_rights: {header_dict['export_rights']}")
+        # logger.debug(f"Secret export_nbplain: {header_dict['export_nbplain']}")
+        # logger.debug(f"Secret export_nbsecure: {header_dict['export_nbsecure']}")
+        # logger.debug(f"Secret export_counter: {header_dict['export_counter']}")
+        # logger.debug(f"Secret fingerprint: {header_dict['fingerprint']}")
+        # logger.debug(f"Secret label: {header_dict['label']}")
+        # logger.debug(f"Secret label_list: {header_dict['label_list']}")
+        # logger.debug(f"++++++++++++++++++++++++++++++++")
+                    
+        return header_dict
+    
+    def parse_seedkeeper_log(self, log):
+        
+        # todo: 
+        LOG_SIZE=7
+        if (len(log)<LOG_SIZE):
+            logger.error(f"Log record has the wrong lenght {len(log)}, should be {LOG_SIZE}")
+            raise Exception(f"Log record has the wrong lenght {len(log)}, should be {LOG_SIZE}")
+        
+        ins= log[0]
+        id1= log[1]*256+ log[2]
+        id2= log[3]*256+ log[4]
+        res= log[5]*256+ log[6]
+        
+        return (ins, id1, id2, res)
+
+    #################################
+    #                   PERSO PKI                 #        
+    #################################    
+    
+    def convert_bytes_to_string_pem(self, cert_bytes):
+        
+        #logger.debug(f"certbytes size: {str(len(cert_bytes))}")
+        #logger.debug(f"convert_bytes_to_string_pem certbytes: {str(cert_bytes)}")
+        #logger.debug(f"convert_bytes_to_string_pem certbytes: {bytes(cert_bytes).hex()}")
+        cert_bytes_b64 = base64.b64encode(bytes(cert_bytes))
+        cert_b64= cert_bytes_b64.decode('ascii')
+        cert_pem= "-----BEGIN CERTIFICATE-----\r\n" 
+        cert_pem+= '\r\n'.join([cert_b64[i:i+64] for i in range(0, len(cert_b64), 64)]) 
+        cert_pem+= "\r\n-----END CERTIFICATE-----"
+        return cert_pem
+        
+    def verify_challenge_response_pki(self, response, challenge_from_host, pubkey):
+        logger.debug("In verify_challenge_response_pki")
+        
+        from ecdsa import VerifyingKey, BadSignatureError, MalformedPointError
+        
+        # parse response 
+        challenge_from_device= bytes(response[0:32])
+        sig_size= ((response[32] & 0xFF)<<8) + (response[33] & 0xFF)
+        sig= bytes(response[34:(34+sig_size)])
+        challenge= "Challenge:".encode("utf-8") + challenge_from_device + challenge_from_host
+        logger.debug("challenge: "+ challenge.hex())
+        
+        # parse pubkey & verify sig
+        vk = VerifyingKey.from_string(bytes(pubkey), curve=SECP256k1, hashfunc=sha256, validate_point=True)
+        try:
+            vk.verify(sig, challenge, hashfunc=sha256, sigdecode=sigdecode_der)
+            return True, ""
+        except BadSignatureError:
+            return False, "Bad signature during challenge response!"
+        except MalformedPointError:
+            return False, "Invalid X9.62 encoding of the public key: " + bytes(pubkey).hex()
+        
+        
+        
     

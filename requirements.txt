@@ -1,3 +1,5 @@
-pyscard
-ecdsa
-pyaes
+pyscard==2.0.0
+ecdsa==0.15
+pyaes==1.6.1
+cryptography==3.3.1
+pyopenssl==20.0.0 # for certificate chain validation
