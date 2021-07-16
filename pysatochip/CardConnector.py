@@ -1182,11 +1182,11 @@ class CardConnector:
         
         while (self.card_present):
             if self.pin is None:
-                is_PIN= None
+                is_PIN= False
                 if self.client is not None:
                     msg = f'Enter the PIN for your {self.card_type}:'
                     (is_PIN, pin_0)= self.client.PIN_dialog(msg) #todo: use request?
-                if is_PIN is None:
+                if is_PIN is False:
                     raise RuntimeError(('Device cannot be unlocked without PIN code!'))
                 pin_0=list(pin_0)
             else:
