@@ -6,13 +6,12 @@ from smartcard.Exceptions import CardConnectionException, CardRequestTimeoutExce
 from smartcard.util import toHexString, toBytes
 from smartcard.sw.SWExceptions import SWException
 
-from .JCconstants import JCconstants
+from .JCconstants import *
 from .CardDataParser import CardDataParser
 from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
 from .util import msg_magic, sha256d, hash_160, EncodeBase58Check
-from .version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION, PYSATOCHIP_VERSION
 from .certificate_validator import CertificateValidator
 
 import hashlib
@@ -22,8 +21,8 @@ import logging
 from os import urandom
 
 #debug
-import sys
-import traceback
+# import sys
+# import traceback
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -98,6 +97,23 @@ class RemovalObserver(CardObserver):
             self.cc.cardservice.connection = card.createConnection()
             self.cc.cardservice.connection.connect()
             self.cc.cardservice.connection.addObserver(self.observer)
+            
+            # get CPLC
+            try:
+                (response_CPLC, sw1, sw2) = self.cc.card_get_CPLC()
+                logger.debug(f"DEBUG CPLC: {bytes(response_CPLC).hex()}")
+                (response_IIN, sw1, sw2) = self.cc.card_get_IIN()
+                logger.debug(f"DEBUG IIN: {bytes(response_IIN).hex()}")
+                (response_CIN, sw1, sw2) = self.cc.card_get_CIN()
+                logger.debug(f"DEBUG CIN: {bytes(response_CIN).hex()}")
+                self.cc.UID= response_CPLC+response_IIN+response_CIN
+                logger.debug(f"DEBUG UID: {bytes(self.cc.UID).hex()}")
+                self.cc.UID_SHA1= hashlib.sha1(bytes(self.cc.UID)).hexdigest()
+                logger.debug(f"DEBUG UID_SHA1: {self.cc.UID_SHA1}")
+            except Exception as exc:
+                logger.warning(f"Error during CPLC/IIN/CIN: {repr(exc)}")
+                
+            #select applet
             try:
                 (response, sw1, sw2) = self.cc.card_select()
                 if sw1!=0x90 or sw2!=0x00:
@@ -107,12 +123,12 @@ class RemovalObserver(CardObserver):
                 if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                     self.cc.card_disconnect()
                     break
-
                 if (self.cc.needs_secure_channel):
                     self.cc.card_initiate_secure_channel()
                     
             except Exception as exc:
                 logger.warning(f"Error during connection: {repr(exc)}")
+                
             if self.cc.client is not None:
                 self.cc.client.request('update_status',True)                
                 
@@ -135,8 +151,9 @@ class CardConnector:
     # v0.12: support for SeedKeeper &  factory-reset & Perso certificate & card label
     # define the apdus used in this script
     SATOCHIP_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
-    SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SatoChip
-
+    SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SeedKeeper
+    SATODIME_AID= [0x53, 0x61, 0x74, 0x6f, 0x44, 0x69, 0x6d, 0x65] #SatoDime
+    
     def __init__(self, client=None, loglevel= logging.WARNING):
         logger.setLevel(loglevel)
         logger.info(f"Logging set to level: {str(loglevel)}")
@@ -155,7 +172,10 @@ class CardConnector:
         # cache PIN
         self.pin_nbr=None
         self.pin=None
-        # SeedKeeper or Satochip?
+        # cache unlock_secret (Satodime)
+        self.unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
+        self.unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
+        # Satodime, SeedKeeper or Satochip?
         self.card_type= None
         self.cert_pem=None # PEM certificate of device, if any
         # cardservice
@@ -179,45 +199,95 @@ class CardConnector:
     def card_transmit(self, plain_apdu):
         logger.debug("In card_transmit")
         while(self.card_present):
-            try:
-                #encrypt apdu
-                ins= plain_apdu[1]
+            #try:
+            #encrypt apdu
+            ins= plain_apdu[1]
+            if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+                apdu = self.card_encrypt_secure_channel(plain_apdu)
+            else:
+                apdu= plain_apdu
+                
+            # transmit apdu
+            (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
+            
+            #decrypt response
+            if (sw1==0x90) and (sw2==0x00):
                 if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                    apdu = self.card_encrypt_secure_channel(plain_apdu)
-                else:
-                    apdu= plain_apdu
-                    
-                # transmit apdu
-                (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
+                    response= self.card_decrypt_secure_channel(response)
+                return (response, sw1, sw2)
+            # PIN authentication is required
+            elif (sw1==0x9C) and (sw2==0x06):
+                (response, sw1, sw2)= self.card_verify_PIN()
+            elif  (sw1==0x6A) and (sw2==0x82):
+                raise CardSelectError("CardSelect error", ins=ins)
+            
+            # TODO: manage errors in calling methods?
+            elif (sw1==0x9c) and (sw2==0x10):
+                raise IncorrectP1Error("APDU error: wrong P1 parameters", ins= ins)
+            elif (sw1==0x9c) and (sw2==0x51):
+                raise IncorrectUnlockCodeError("Satodime error: incorrect unlock code", ins= ins)
+            elif (sw1==0x9c) and (sw2==0x52):
+                raise IncorrectKeyslotStateError("Satodime error: incorrect keyslot state", ins= ins)
+            elif (sw1==0x9c) and (sw2==0x53):
+                raise IncorrectProtocolMediaError("Satodime error: incorrect protocol media", ins= ins)
+            elif (sw1==0x9c) and (sw2==0x54):
+                raise UnknownProtocolMediaError("Satodime error: unknown protocol media", ins= ins)
+            
+            else:
+                #raise ApduError(f"Unknown error code {hex(sw1*256+sw2)}", sw1, sw2, ins)
+                return (response, sw1, sw2)
                 
-                # PIN authentication is required
-                if (sw1==0x9C) and (sw2==0x06):
-                    (response, sw1, sw2)= self.card_verify_PIN()
-                #decrypt response
-                elif (sw1==0x90) and (sw2==0x00):
-                    if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                        response= self.card_decrypt_secure_channel(response)
-                    return (response, sw1, sw2)
-                else:
-                    return (response, sw1, sw2)
-                
-            except Exception as exc:
-                logger.warning(f"Error during connection: {repr(exc)}")
-                traceback.print_exc() #debug
-                if self.client is not None:
-                    self.client.request('show_error',"Error during connection:"+repr(exc))
-                return ([], 0x00, 0x00)
+            # except Exception as exc:
+                # logger.warning(f"Error during connection: {repr(exc)}")
+                # traceback.print_exc() #debug
+                # if self.client is not None:
+                    # self.client.request('show_error',"Error during connection:"+repr(exc))
+                # return ([], 0x00, 0x00)
         
         # no card present
-        if self.client is not None:
-            self.client.request('show_error','No card found! Please insert card!')
-        return ([], 0x00, 0x00)
-        #TODO return errror or throw exception?
-            
+        # if self.client is not None:
+            # self.client.request('show_error','No card found! Please insert card!')
+        #return ([], 0x00, 0x00) #TODO return errror or throw exception?
+        raise CardNotPresentError('No card found! Please insert card!')
+        
+        
     def card_get_ATR(self):
         logger.debug('In card_get_ATR()')
         return self.cardservice.connection.getATR()
     
+    def card_get_CPLC(self):
+        logger.debug("In card_get_CPLC")
+        cla= 0x80 #CLA_GP
+        ins= 0xCA # GPSession.INS_GET_DATA 
+        p1= 0x9F
+        p2= 0x7F
+        apdu=[cla, ins, p1, p2]
+        #(response, sw1, sw2)= self.card_transmit(apdu)
+        (response, sw1, sw2) = self.cardservice.connection.transmit(apdu) # bypass card_transmit checks...
+        return (response, sw1, sw2)
+        
+    def card_get_IIN(self):
+        logger.debug("In card_get_IIN")
+        cla= 0x80 #CLA_GP
+        ins= 0xCA # GPSession.INS_GET_DATA 
+        p1= 0x00
+        p2= 0x42
+        apdu=[cla, ins, p1, p2]
+        #(response, sw1, sw2)= self.card_transmit(apdu)
+        (response, sw1, sw2) = self.cardservice.connection.transmit(apdu) # bypass card_transmit checks...
+        return (response, sw1, sw2)
+        
+    def card_get_CIN(self):
+        logger.debug("In card_get_CIN")
+        cla= 0x80 #CLA_GP
+        ins= 0xCA # GPSession.INS_GET_DATA 
+        p1= 0x00
+        p2= 0x45
+        apdu=[cla, ins, p1, p2]
+        #(response, sw1, sw2)= self.card_transmit(apdu)
+        (response, sw1, sw2) = self.cardservice.connection.transmit(apdu) # bypass card_transmit checks...
+        return (response, sw1, sw2)
+        
     def card_disconnect(self):
         logger.debug('In card_disconnect()')
         self.pin= None #reset PIN
@@ -246,19 +316,43 @@ class CardConnector:
         logger.debug("In card_select")
         SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
         apdu = SELECT + CardConnector.SATOCHIP_AID
-        (response, sw1, sw2) = self.card_transmit(apdu)
-        
-        if sw1==0x90 and sw2==0x00:
+        try: 
+            (response, sw1, sw2) = self.card_transmit(apdu)
             self.card_type="Satochip"
             logger.debug("Found a Satochip!")
-        else:
+        except CardSelectError as ex:
             SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
             apdu = SELECT + CardConnector.SEEDKEEPER_AID
-            (response, sw1, sw2) = self.card_transmit(apdu)
-            if sw1==0x90 and sw2==0x00:
+            try: 
+                (response, sw1, sw2) = self.card_transmit(apdu)
                 self.card_type="SeedKeeper"
                 logger.debug("Found a SeedKeeper!")
-        
+            except CardSelectError as ex:
+                SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
+                apdu = SELECT + CardConnector.SATODIME_AID
+                (response, sw1, sw2) = self.card_transmit(apdu)
+                self.card_type="Satodime"
+                logger.debug("Found a Satodime!")
+                    
+        # (response, sw1, sw2) = self.card_transmit(apdu)
+        # if sw1==0x90 and sw2==0x00:
+            # self.card_type="Satochip"
+            # logger.debug("Found a Satochip!")
+        # else:
+            # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
+            # apdu = SELECT + CardConnector.SEEDKEEPER_AID
+            # (response, sw1, sw2) = self.card_transmit(apdu)
+            # if sw1==0x90 and sw2==0x00:
+                # self.card_type="SeedKeeper"
+                # logger.debug("Found a SeedKeeper!")
+            # else:
+                # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
+                # apdu = SELECT + CardConnector.SATODIME_AID
+                # (response, sw1, sw2) = self.card_transmit(apdu)
+                # if sw1==0x90 and sw2==0x00:
+                    # self.card_type="Satodime"
+                    # logger.debug("Found a Satodime!")
+                    
         return (response, sw1, sw2)
 
     def card_get_status(self):
@@ -268,7 +362,7 @@ class CardConnector:
         p1= 0x00
         p2= 0x00
         apdu=[cla, ins, p1, p2]
-        (response, sw1, sw2)= self.card_transmit(apdu)
+        (response, sw1, sw2)= self.card_transmit(apdu) # todo: try/except if setup not done
         d={}
         if (sw1==0x90) and (sw2==0x00):
             d["protocol_major_version"]= response[0]
@@ -391,6 +485,11 @@ class CardConnector:
         (response, sw1, sw2) = self.card_transmit(apdu)
         if (sw1==0x90) and (sw2== 0x00):
             self.set_pin(0, pin0) #cache PIN value
+            
+            if self.card_type=='Satodime': # cache values 
+               self.satodime_set_unlock_counter(response[0:SIZE_UNLOCK_COUNTER])
+               self.satodime_set_unlock_secret(response[SIZE_UNLOCK_COUNTER:(SIZE_UNLOCK_COUNTER+SIZE_UNLOCK_SECRET)])
+                    
         return (response, sw1, sw2)
 
     ###########################################
@@ -1850,12 +1949,321 @@ class CardConnector:
         
         return verif;
     
+    def card_verify_authenticity(self):
+        logger.debug('In card_verify_authenticity')
+        
+        # get certificate from device
+        cert_pem=txt_error=""
+        try:
+            cert_pem=self.card_export_perso_certificate()
+            logger.debug('Cert PEM: '+ str(cert_pem))
+        except CardError as ex:
+            txt_error= ''.join(["Unable to get device certificate: feature unsupported! \n", 
+                                "Authenticity validation is only available starting with Satochip v0.12 and higher"])
+        except CardNotPresentError as ex:
+            txt_error= "No card found! Please insert card."
+        except UnexpectedSW12Error as ex:
+            txt_error= "Exception during device certificate export: " + str(ex)
+        
+        if cert_pem=="(empty)":
+            txt_error= "Device certificate is empty: the card has not been personalized!"
+        
+        if txt_error!="":
+            return False, "(empty)", "(empty)", "(empty)", txt_error
+        
+        # check the certificate chain from root CA to device
+        validator= CertificateValidator()
+        is_valid_chain, device_pubkey, txt_ca, txt_subca, txt_device, txt_error= validator.validate_certificate_chain(cert_pem, self.card_type)
+        if not is_valid_chain:
+            return False, txt_ca, txt_subca, txt_device, txt_error
+        
+        # perform challenge-response with the card to ensure that the key is correctly loaded in the device
+        is_valid_chalresp, txt_error = self.card_challenge_response_pki(device_pubkey)
+        if not is_valid_chalresp:
+            return False, txt_ca, txt_subca, txt_device, txt_error
+            
+        # TODO: verify that device subject matches card serial number
+        cert_dict =  validator.parse_pem_certificate(cert_pem)
+        subject_dict= cert_dict['subject']
+        logger.debug(f'In card_verify_authenticity subject_dict= {subject_dict}')
+        subject= subject_dict.get(b'CN', None).decode('utf-8')
+        logger.debug(f'In card_verify_authenticity subject= {subject}')
+        logger.debug(f'In card_verify_authenticity UID_SHA1= {self.UID_SHA1}')
+        if subject.lower() == self.UID_SHA1.lower():
+            is_valid_serial_number= True
+        else:
+            is_valid_serial_number= False
+            txt_error= f"Certificate subject {subject} does not match the card serial number {self.UID_SHA1}!"
+        
+        return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
+    
+    #################################
+    #                  SATODIME                   #
+    #################################
+    
+    def satodime_set_unlock_secret(self, unlock_secret=[]):
+        if unlock_secret==[]:
+            unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
+        self.unlock_secret=unlock_secret
+    def satodime_set_unlock_counter(self, unlock_counter=[]):
+        if unlock_counter==[]:
+            unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
+        self.unlock_counter=unlock_counter
+    def satodime_increment_unlock_counter(self):
+        counter_int= int.from_bytes( self.unlock_counter, byteorder='big', signed=False)
+        counter_int+=1
+        self.unlock_counter= list( counter_int.to_bytes(4, byteorder='big', signed=False))
+        
+    def satodime_get_status(self):
+        """Return status info specific to Satodime"""
+        logger.debug("In satodime_get_status")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x50
+        p1= 0x00
+        p2= 0x00
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x00 and sw2==0x00):
+            logger.error(f"Error while fetching Satodime status: no card present (code 0x0000)")
+            raise CardNotPresentError(f"Error while fetching Satodime status: no card present (code 0x0000)")
+        elif (sw1==0x9c and sw2==0x04):
+            logger.error(f"Error while fetching Satodime status: setup not done (code 0x0000)")
+            raise CardSetupNotDoneError(f"Error while fetching Satodime status: setup not done (code 0x9c04)")
+        else: 
+            logger.error(f"Error while fetching Satodime status: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error while fetching Satodime status: (error code {hex(256*sw1+sw2)})")
+        
+        offset=0
+        satodime_status={}
+        satodime_status['unlock_counter']= response[offset:(offset+SIZE_UNLOCK_COUNTER)]
+        self.unlock_counter=satodime_status['unlock_counter']
+        offset+=SIZE_UNLOCK_COUNTER
+        satodime_status['max_num_keys']= response[offset]
+        offset+=1
+        satodime_status['satodime_keys_status']=  response[offset:]
+        return (response, sw1, sw2, satodime_status)
+        # max_num_keys= response[0]
+        # satodime_keys_status= response[1:]
+        # return (response, sw1, sw2, max_num_keys, satodime_keys_status)
+        
+    def satodime_get_keyslot_status(self, key_nbr: int):
+        logger.debug("In satodime_get_keyslot_status")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x51
+        p1= (key_nbr%256)
+        p2= 0x00
+        apdu=[cla, ins, p1, p2]
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x00 and sw2==0x00):
+            logger.error(f"Error while fetching Satodime key {key_nbr} status: no card present (code 0x0000)")
+            raise CardNotPresentError(f"Error while fetching Satodime key {key_nbr} status: no card present (code 0x0000)")
+        
+        # parse info
+        keyslot_status= self.parser.parse_satodime_get_keyslot_status(response)
+        return (response, sw1, sw2, keyslot_status)
+        
+    def satodime_set_keyslot_status_part0(self, key_nbr: int, RFU1:int, RFU2:int, key_asset:int, key_slip44, key_contract, key_tokenid):
+        
+        logger.debug("In satodime_set_keyslot_status")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x52
+        p1= (key_nbr%256)
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE + 3 + SIZE_SLIP44 + SIZE_CONTRACT + SIZE_TOKENID
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        if key_slip44==[]: key_slip44= [0x80, 0x00, 0x00, 0x00]
+        if key_contract==[]: key_contract= SIZE_CONTRACT*[0x00]
+        if key_tokenid==[]: key_tokenid= SIZE_TOKENID*[0x00]
+        if type(key_slip44) is bytes: key_slip44= list(key_slip44)
+        if type(key_contract) is bytes: key_contract= list(key_contract)
+        if type(key_tokenid) is bytes: key_tokenid= list(key_tokenid)
+        
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+        
+        data= self.unlock_counter + unlock_code + [RFU1%256, RFU2%256, (key_asset%256)] + key_slip44 + key_contract + key_tokenid
+        if len(data) != datasize:
+           raise Exception(f"Error in satodime_set_keyslot_status: wrong status length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        return (response, sw1, sw2)
+        
+    def satodime_set_keyslot_status_part1(self, key_nbr: int, key_data):
+        
+        logger.debug("In satodime_set_keyslot_status")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x52
+        p1= (key_nbr%256)
+        p2= 0x01
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE + SIZE_DATA
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        if key_data==[]: key_data= SIZE_DATA*[0x00]
+        if type(key_data) is bytes: key_data= list(key_data)
+        
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+        
+        data= self.unlock_counter + unlock_code + key_data
+        if len(data) != datasize:
+           raise Exception(f"Error in satodime_set_keyslot_status: wrong status length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        return (response, sw1, sw2)  
+        
+    def satodime_get_pubkey(self, key_nbr: int):
+        logger.debug("In satodime_get_pubkey")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x55
+        p1= (key_nbr%256)
+        p2= 0x00
+    
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        # parse answer
+        (pubkey_list, pubkey_comp_list, sig_list)= self.parser.parse_satodime_get_pubkey(response)
+        
+        return (response, sw1, sw2, pubkey_list, pubkey_comp_list)
+        
+    def satodime_get_privkey(self, key_nbr: int):
+        logger.debug("In satodime_get_privkey")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x56
+        p1= (key_nbr%256)
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        # compute unlock_code or use default
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+               
+        data= self.unlock_counter + unlock_code
+        if len(data) != datasize:
+            raise Exception(f"Error in satodime_seal_key: wrong data length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+                
+        # parse answer
+        (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
+        
+        return (response, sw1, sw2, entropy_list, privkey_list)
+    
+    def satodime_seal_key(self, key_nbr: int, entropy_user):
+    
+        logger.debug("In satodime_seal_key")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x57
+        p1= (key_nbr%256)
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE + SIZE_ENTROPY
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        if type(entropy_user) is bytes: entropy_user= list(entropy_user)
+        
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+                  
+        data= self.unlock_counter + unlock_code + entropy_user
+        if len(data) != datasize:
+            raise Exception(f"Error in satodime_seal_key: wrong data length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        # parse answer
+        (pubkey_list, pubkey_comp_list, sig_list)= self.parser.parse_satodime_get_pubkey(response)
+        
+        return (response, sw1, sw2, pubkey_list, pubkey_comp_list)
+        
+    def satodime_unseal_key(self, key_nbr: int):
+        logger.debug("In satodime_unseal_key")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x58
+        p1= (key_nbr%256)
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+        
+        data= self.unlock_counter + unlock_code
+        if len(data) != datasize:
+            raise Exception(f"Error in satodime_unseal_key: wrong data length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        # parse answer
+        (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
+        
+        return (response, sw1, sw2, entropy_list, privkey_list)
+    
+    def satodime_reset_key(self, key_nbr: int):
+        logger.debug("In satodime_reset_key")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x59
+        p1= (key_nbr%256)
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE
+        apduheader=[cla, ins, p1, p2, datasize]
+
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+        
+        data= self.unlock_counter + unlock_code
+        if len(data) != datasize:
+            raise Exception(f"Error in satodime_unseal_key: wrong data length {len(data)} instead of {datasize}")
+        apdu=apduheader+data
+        
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        return (response, sw1, sw2)
+    
+    def satodime_initiate_ownership_transfer(self):
+        
+        logger.debug("In satodime_initiate_ownership_transfer")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x5A
+        p1= 0x00
+        p2= 0x00
+        datasize= SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE
+        apduheader=[cla, ins, p1, p2, datasize]
+        
+        # compute unlock_code
+        unlock_code= list( hmac.new(bytes(self.unlock_secret), bytes(apduheader+ self.unlock_counter), hashlib.sha1).digest() )
+                
+        data=self.unlock_counter +  unlock_code
+        apdu= apduheader+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        self.satodime_increment_unlock_counter() 
+        
+        return (response, sw1, sw2)
     
     #################################
     #                     HELPERS                 #        
     ################################# 
     
-    #deprecated
+    #deprecated: since satochip applet v0.12, authentikey is generated once at initialization and does not derive from the seed
     def get_authentikey_from_masterseed(self, masterseed):
         # compute authentikey locally from masterseed
         # authentikey privkey is first 32 bytes of HmacSha512('Bitcoin seed2', masterseed)
@@ -1869,6 +2277,55 @@ class CardConnector:
         
         return pub_hex
 
+
+    #################################
+    #                      ERRORS                  #        
+    ################################# 
+    
+class ApduError(Exception):
+    def __init__(self, message, sw1=0x00, sw2=0x00, ins=0x00, response=[]):            
+        super().__init__(message)
+        self.sw1 = sw1
+        self.sw2= sw2
+        self.ins= ins
+        self.response= response
+
+
+class CardSelectError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x6A, 0x82, ins, response)
+
+# Generic 
+class CardSetupNotDoneError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x04, ins, response)
+
+class IncorrectP1Error(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x10, ins, response)
+
+# Satodime
+class UnknownProtocolMediaError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x54, ins, response)
+
+class IncorrectProtocolMediaError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x53, ins, response)
+
+class IncorrectKeyslotStateError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x52, ins, response)
+
+class IncorrectUnlockCodeError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x51, ins, response)
+
+class IncorrectUnlockCounterError(ApduError):
+    def __init__(self, message, ins=0x00, response=[]):            
+        super().__init__(message, 0x9c, 0x50, ins, response)
+
+# legacy
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""
     pass
