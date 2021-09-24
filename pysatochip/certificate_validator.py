@@ -24,6 +24,7 @@ class CertificateValidator:
         if is_valid:
             return (is_valid, device_pubkey, txt_ca, txt_subca, txt_device, txt_error)
         elif USE_TEST_CA: # check with test ca:
+            logger.warning("Certificate chains NOT VALID for production PKI")
             (is_valid_test, device_pubkey_test, txt_ca_test, txt_subca_test, txt_device_test, txt_error_test)= self._validate_chain(device_pem, device_type, use_test=True)
             if is_valid_test:
                 is_valid_test= False
