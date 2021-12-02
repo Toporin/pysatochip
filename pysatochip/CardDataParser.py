@@ -585,7 +585,7 @@ class CardDataParser:
         size_tokenid= key_tokenid[1]
         key_tokenid_hex= "0x"+ bytes(key_tokenid[2:(2+size_tokenid)]).hex() # parse as tlv
         #key_tokenid_hex= bytes(key_tokenid).hex() #todo
-        size_data= key_data[1]
+        size_data= key_data[1] # key_data[0] is RFU (could be used as a type tag)
         key_data_txt= bytes(key_data[2:(2+size_data)]).decode("utf-8")  #parse as tlv-encoded utf8 string
         #key_data_txt= bytes(key_data).hex() #todo
         
