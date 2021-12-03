@@ -242,19 +242,8 @@ class CardConnector:
                 #raise ApduError(f"Unknown error code {hex(sw1*256+sw2)}", sw1, sw2, ins)
                 return (response, sw1, sw2)
                 
-            # except Exception as exc:
-                # logger.warning(f"Error during connection: {repr(exc)}")
-                # traceback.print_exc() #debug
-                # if self.client is not None:
-                    # self.client.request('show_error',"Error during connection:"+repr(exc))
-                # return ([], 0x00, 0x00)
-        
         # no card present
-        # if self.client is not None:
-            # self.client.request('show_error','No card found! Please insert card!')
-        #return ([], 0x00, 0x00) #TODO return errror or throw exception?
         raise CardNotPresentError('No card found! Please insert card!')
-        
         
     def card_get_ATR(self):
         logger.debug('In card_get_ATR()')
@@ -317,77 +306,9 @@ class CardConnector:
     def get_sw12(self, sw1, sw2):
         return 16*sw1+sw2
 
-    # def card_select(self, card_type=None):
-        # logger.debug("In card_select")
-        # SELECT = [0x00, 0xA4, 0x04, 0x00]
-        
-        # try: 
-            # if (card_type=="satochip"):
-                # apdu = SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # self.card_type="Satochip"
-                # logger.debug("Found a Satochip!")
-                # return (response, sw1, sw2)
-
-            # elif (card_type=="seedkeeper"):
-                # apdu = SELECT + [len(CardConnector.SEEDKEEPER_AID)] + CardConnector.SEEDKEEPER_AID
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # self.card_type="SeedKeeper"
-                # logger.debug("Found a SeedKeeper!")
-                # return (response, sw1, sw2)
-                
-            # elif (card_type=="satodime"):
-                # apdu = SELECT + [len(CardConnector.SATODIME_AID)] + CardConnector.SATODIME_AID
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # self.card_type="Satodime"
-                # logger.debug("Found a Satodime!")
-                # return (response, sw1, sw2)
-            
-            # elif (card_type==None):
-                # try: 
-                    # apdu = SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
-                    # (response, sw1, sw2) = self.card_transmit(apdu)
-                    # self.card_type="Satochip"
-                    # logger.debug("Found a Satochip!")
-                    # return (response, sw1, sw2)
-                # except CardSelectError as ex:
-                    # try: 
-                        # apdu = SELECT + [len(CardConnector.SEEDKEEPER_AID)] + CardConnector.SEEDKEEPER_AID
-                        # (response, sw1, sw2) = self.card_transmit(apdu)
-                        # self.card_type="SeedKeeper"
-                        # logger.debug("Found a SeedKeeper!")
-                        # return (response, sw1, sw2)
-                    # except CardSelectError as ex:
-                        # try:
-                            # apdu = SELECT + [len(CardConnector.SATODIME_AID)] + CardConnector.SATODIME_AID
-                            # (response, sw1, sw2) = self.card_transmit(apdu)
-                            # self.card_type="Satodime"
-                            # logger.debug("Found a Satodime!")
-                            # return (response, sw1, sw2)
-                        # except CardSelectError as ex:
-                            # return ([], 0x6A, 0x82)
-            
-            # else:
-                # self.card_type=None
-                # return ([], 0x6A, 0x82)
-            
-        # except CardSelectError as ex:
-            # self.card_type=None
-            # return ([], 0x6A, 0x82)
-        
     def card_select(self):
         logger.debug("In card_select")
-        
-        # if no filter, try all supported applet
-        # if (self.card_filter==None):
-            # try: 
-                # return self.card_select_satochip()
-            # except CardSelectError as ex:
-                # try: 
-                    # return self.card_select_seedkeeper()
-                # except CardSelectError as ex:
-                    # return self.card_select_satodime() # raise exception if fail
-        
+       
         # if no filter, try all supported applet in this order
         if (self.card_filter==None):
             self.card_filter= ["satochip", "seedkeeper", "satodime"]
@@ -408,18 +329,6 @@ class CardConnector:
         
         # no suitable card found
         raise CardSelectError("CardSelect error", ins=0xA4)
-        
-        # elif (self.card_filter=="satochip"):
-            # return self.card_select_satochip()
-        
-        # elif (self.card_filter=="seedkeeper"):
-            # return self.card_select_seedkeeper()
-        
-        # elif (self.card_filter=="satodime"):
-            # return self.card_select_satodime()
-            
-        # else:
-            # raise CardSelectError("CardSelect error", ins=0xA4)
           
     def card_select_satochip(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
@@ -441,46 +350,6 @@ class CardConnector:
         self.card_type="Satodime"
         logger.debug("Found a Satodime!")
         return (response, sw1, sw2)
-                    
-        # apdu = SELECT + CardConnector.SATOCHIP_AID
-        # try: 
-            # (response, sw1, sw2) = self.card_transmit(apdu)
-            # self.card_type="Satochip"
-            # logger.debug("Found a Satochip!")
-        # except CardSelectError as ex:
-            # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
-            # apdu = SELECT + CardConnector.SEEDKEEPER_AID
-            # try: 
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # self.card_type="SeedKeeper"
-                # logger.debug("Found a SeedKeeper!")
-            # except CardSelectError as ex:
-                # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
-                # apdu = SELECT + CardConnector.SATODIME_AID
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # self.card_type="Satodime"
-                # logger.debug("Found a Satodime!")
-                    
-        # (response, sw1, sw2) = self.card_transmit(apdu)
-        # if sw1==0x90 and sw2==0x00:
-            # self.card_type="Satochip"
-            # logger.debug("Found a Satochip!")
-        # else:
-            # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x0A]
-            # apdu = SELECT + CardConnector.SEEDKEEPER_AID
-            # (response, sw1, sw2) = self.card_transmit(apdu)
-            # if sw1==0x90 and sw2==0x00:
-                # self.card_type="SeedKeeper"
-                # logger.debug("Found a SeedKeeper!")
-            # else:
-                # SELECT = [0x00, 0xA4, 0x04, 0x00, 0x08]
-                # apdu = SELECT + CardConnector.SATODIME_AID
-                # (response, sw1, sw2) = self.card_transmit(apdu)
-                # if sw1==0x90 and sw2==0x00:
-                    # self.card_type="Satodime"
-                    # logger.debug("Found a Satodime!")
-                    
-        #{return (response, sw1, sw2)
 
     def card_get_status(self):
         logger.debug("In card_get_status")
@@ -526,6 +395,10 @@ class CardConnector:
             #raise RuntimeError(f"Unknown error in get_status() (error code {hex(256*sw1+sw2)})")
             
         return (response, sw1, sw2, d)
+    
+    ###########################################
+    #                Generic applet methods                     #
+    ###########################################
     
     def card_get_label(self):
     
