@@ -18,6 +18,40 @@
  * limitations under the License.
 """
 
+MAX_CARD_LABEL_SIZE = 64
+
+###################################
+#                              SATODIME                          #
+###################################
+
+SIZE_ECPRIVKEY= 32
+SIZE_ECPUBKEY= 65
+SIZE_ECCOORDX= 32
+SIZE_ENTROPY= 32
+
+SIZE_UNLOCK_COUNTER=4
+SIZE_UNLOCK_CODE=20
+SIZE_UNLOCK_SECRET=20
+
+SIZE_SLIP44=4
+SIZE_CONTRACT=2+32
+SIZE_TOKENID=2+32
+SIZE_DATA=2+64
+SIZE_KEY_METADATA=  3 + SIZE_SLIP44 + SIZE_CONTRACT + SIZE_TOKENID + SIZE_DATA
+
+STATE_UNINITIALIZED=0;
+STATE_SEALED=1;
+STATE_UNSEALED=2;
+
+DIC_STATE= {0:'Uninitialized', 1:'Sealed', 2:'Unsealed', 3:'Unknown'}
+DIC_ASSET_BY_CODE= {0x00:'Undefined', 0x01:'Coin', 0x10:'Token', 0x11:'ERC20', 0x12:'BEP20', 0x40:'NFT', 0x41:'ERC721', 0x42:'BEP721', 0xff:'Other'}
+DIC_CODE_BY_ASSET= {v: k for k, v in DIC_ASSET_BY_CODE.items()} #invert key and values
+LIST_ASSET= ['Coin', 'Token', 'ERC20', 'BEP20', 'NFT', 'ERC721', 'BEP721']
+
+# Token & NFT bounds
+TOKEN_RANGE=[0x10, 0x40]
+NFT_RANGE=[0x40, 0x70]
+
 class JCconstants:
 
     #Maximum number of keys handled by the Cardlet
@@ -182,8 +216,8 @@ class JCconstants:
     # Incorrect transaction hash */
     SW_INCORRECT_TXHASH =  0x9C15;
 
-    '''****************************************
-       *          Algorithm codes             *
+    '''*********** *****************************
+       *                 Algorithm codes                   *
        ****************************************'''
 
     # Algorithm Type in APDUs

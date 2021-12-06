@@ -1,0 +1,47 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 6 (0x6)
+        Signature Algorithm: ecdsa-with-SHA512
+        Issuer: C=BE, ST=Brussels, O=Toporin, CN=TEST CA 1
+        Validity
+            Not Before: Dec  1 12:00:00 2020 GMT
+            Not After : Dec  1 12:00:00 2040 GMT
+        Subject: C=BE, ST=Brussels, O=Toporin, OU=Satodime, CN=Satodime Personalization SubCA 1
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:1c:3a:d2:28:8f:3f:41:f8:b6:28:d4:e2:af:56:
+                    b3:3d:ab:52:87:a1:a9:7d:95:18:ee:2d:5d:9c:6c:
+                    b4:ae:b3:b2:cc:a3:a2:82:58:99:83:fa:fb:45:76:
+                    57:c2:ce:42:06:05:6f:73:95:51:ae:a5:13:99:50:
+                    9c:f9:e3:89:be
+                ASN1 OID: secp256k1
+        X509v3 extensions:
+            X509v3 Basic Constraints: critical
+                CA:TRUE, pathlen:0
+            X509v3 Subject Key Identifier: 
+                9D:2A:8B:43:4A:BF:3C:B7:AD:07:ED:23:08:77:9C:E0:1A:42:A5:34
+            X509v3 Key Usage: critical
+                Certificate Sign, CRL Sign
+    Signature Algorithm: ecdsa-with-SHA512
+         30:65:02:31:00:85:8c:0d:8e:ac:3f:6b:d8:60:2b:93:e0:ce:
+         3b:b2:cf:4a:4a:28:d6:e4:f6:93:f9:8e:de:c8:b0:17:1d:7c:
+         69:91:23:ac:9a:b5:c3:2e:00:c7:e7:94:0e:a1:c5:c7:6f:02:
+         30:35:c5:8c:5a:df:ec:90:24:93:db:39:35:91:b0:29:a4:81:
+         9d:62:1a:14:5c:5f:92:3a:25:1f:a8:2d:8e:50:f7:70:a1:65:
+         58:04:fd:2f:4a:b8:6e:f6:9f:53:9e:3d:f4
+-----BEGIN CERTIFICATE-----
+MIICBzCCAY2gAwIBAgIBBjAKBggqhkjOPQQDBDBGMQswCQYDVQQGEwJCRTERMA8G
+A1UECAwIQnJ1c3NlbHMxEDAOBgNVBAoMB1RvcG9yaW4xEjAQBgNVBAMMCVRFU1Qg
+Q0EgMTAeFw0yMDEyMDExMjAwMDBaFw00MDEyMDExMjAwMDBaMHAxCzAJBgNVBAYT
+AkJFMREwDwYDVQQIDAhCcnVzc2VsczEQMA4GA1UECgwHVG9wb3JpbjERMA8GA1UE
+CwwIU2F0b2RpbWUxKTAnBgNVBAMMIFNhdG9kaW1lIFBlcnNvbmFsaXphdGlvbiBT
+dWJDQSAxMFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEHDrSKI8/Qfi2KNTir1azPatS
+h6GpfZUY7i1dnGy0rrOyzKOigliZg/r7RXZXws5CBgVvc5VRrqUTmVCc+eOJvqNF
+MEMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQUnSqLQ0q/PLetB+0jCHec
+4BpCpTQwDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49BAMEA2gAMGUCMQCFjA2OrD9r
+2GArk+DOO7LPSkoo1uT2k/mO3siwFx18aZEjrJq1wy4Ax+eUDqHFx28CMDXFjFrf
+7JAkk9s5NZGwKaSBnWIaFFxfkjolH6gtjlD3cKFlWAT9L0q4bvafU5499A==
+-----END CERTIFICATE-----
