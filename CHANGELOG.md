@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1]:
+
+- Add support for Satodime : the open-source bearer crypto card
+Website: satodime.io
+Github: https://github.com/Toporin/Satodime-Applet
+
+### Added 
+ 
+ - Add support for Satodime
+ - Add test-subca-satochip certificate (for testing only)
+ 
+### Changed
+
+- Refactor card_select() to choose card_applets to select
+    
+    A list of targeted applets is provided in CardConnector constructor through variable 'card_filter'.
+    When a card is inserted, the application only attempts to select these applets.
+    Selection is attempted in the order in which the applets are listed in card_filter.
+    Supported applets are 'satochip', 'seedkeeper' & 'satodime'
+
 ## [0.12.3]: 
 
 ### Changed 
