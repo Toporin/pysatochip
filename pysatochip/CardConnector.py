@@ -181,7 +181,7 @@ class CardConnector:
         self.unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
         # Satodime, SeedKeeper or Satochip?
         self.card_filter= card_filter # limit card_select to a subset of [satochip, seedkeeper, satodime]
-        self.card_type= None
+        self.card_type= "card"
         self.cert_pem=None # PEM certificate of device, if any
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
@@ -291,7 +291,7 @@ class CardConnector:
         self.setup_done= None
         self.needs_secure_channel= None
         self.card_present= False
-        self.card_type= None
+        self.card_type= "card"
         if self.cardservice:
             self.cardservice.connection.disconnect()
             self.cardservice= None
