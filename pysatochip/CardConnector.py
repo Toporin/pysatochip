@@ -177,6 +177,7 @@ class CardConnector:
         self.pin_nbr=None
         self.pin=None
         # cache unlock_secret (Satodime)
+        self.is_owner= False # the owner is the user (device) that knows the unlock_secret
         self.unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
         self.unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
         # Satodime, SeedKeeper or Satochip?
@@ -489,6 +490,7 @@ class CardConnector:
             if self.card_type=='Satodime': # cache values 
                self.satodime_set_unlock_counter(response[0:SIZE_UNLOCK_COUNTER])
                self.satodime_set_unlock_secret(response[SIZE_UNLOCK_COUNTER:(SIZE_UNLOCK_COUNTER+SIZE_UNLOCK_SECRET)])
+               self.is_owner= True
                     
         return (response, sw1, sw2)
 
@@ -2004,7 +2006,9 @@ class CardConnector:
     def satodime_set_unlock_secret(self, unlock_secret=[]):
         if unlock_secret==[]:
             unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
+            self.is_owner= False
         self.unlock_secret=unlock_secret
+        self.is_owner= True
     def satodime_set_unlock_counter(self, unlock_counter=[]):
         if unlock_counter==[]:
             unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
