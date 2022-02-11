@@ -583,8 +583,10 @@ class CardDataParser:
         key_contract_hex= "0x"+ bytes(key_contract[2:(2+size_contract)]).hex() # parse as tlv
         #key_contract_hex= bytes(key_contract).hex() # todo: parse as tlv
         size_tokenid= key_tokenid[1]
-        key_tokenid_hex= "0x"+ bytes(key_tokenid[2:(2+size_tokenid)]).hex() # parse as tlv
-        #key_tokenid_hex= bytes(key_tokenid).hex() #todo
+        key_tokenid_bytes= bytes(key_tokenid[2:(2+size_tokenid)]) 
+        key_tokenid_hex= "0x"+ key_tokenid_bytes.hex() # parse as tlv
+        key_tokenid_int= int.from_bytes( key_tokenid_bytes, "big")  
+        
         size_data= key_data[1] # key_data[0] is RFU (could be used as a type tag)
         key_data_txt= bytes(key_data[2:(2+size_data)]).decode("utf-8")  #parse as tlv-encoded utf8 string
         #key_data_txt= bytes(key_data).hex() #todo
@@ -602,7 +604,7 @@ class CardDataParser:
                                 'key_tokenid':key_tokenid, 'key_data':key_data,
                                 'key_status_txt':key_status_txt, 
                                 'key_asset_txt':key_asset_txt, 'key_slip44_hex':key_slip44_hex,
-                                'key_contract_hex':key_contract_hex, 'key_tokenid_hex':key_tokenid_hex,
+                                'key_contract_hex':key_contract_hex, 'key_tokenid_hex':key_tokenid_hex, 'key_tokenid_int':key_tokenid_int,
                                 'key_data_txt':key_data_txt, 'is_token':is_token, 'is_nft':is_nft}
         
         return keyslot_status
