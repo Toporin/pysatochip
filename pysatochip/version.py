@@ -26,8 +26,10 @@ SEEDKEEPER_PROTOCOL_VERSION= (SEEDKEEPER_PROTOCOL_MAJOR_VERSION<<8)+SEEDKEEPER_P
 # v0.12.1: add SeedKeeper support
 # v0.12.2: add list of 2FA servers to select
 # v0.12.3: patch: downgrade pyscard version in requirements to solve conflicts
-# TODO: include SeedKeeper version
+# v0.12.4: Patch dependencies version & minor issue
+# v0.12.5: remove pyopenssl & pyaes dependencies
+# TODO: include SeedKeeper & Satodime version
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 12
-PYSATOCHIP_REVISION= 4
+PYSATOCHIP_REVISION= 5
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
