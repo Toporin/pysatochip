@@ -2,11 +2,12 @@ from ecdsa import ECDH
 from ecdsa.curves import SECP256k1
 from ecdsa.keys import VerifyingKey
 
-import pyaes
 import hmac
 import logging 
 from os import urandom
 from hashlib import sha1, sha256
+
+from .crypto import aes_encrypt_with_iv, aes_decrypt_with_iv
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -48,12 +49,6 @@ class SecureChannel:
         mac = hmac.new(self.shared_key, "sc_mac".encode('utf-8'), sha1)
         self.mac_key= mac.digest()
         
-        # alternative derivation
-        # tmp_key= sha256(self.shared_key).digest()
-        # self.derived_key = tmp_key[:16]
-        # tmp_key= sha256(tmp_key).digest()
-        # self.mac_key= tmp_key[:20]
-        
         # logger.debug("Derived_key key:"+ self.derived_key.hex()) #debug
         # logger.debug("Mac_key key:"+ self.mac_key.hex()) #debug
         
@@ -72,11 +67,8 @@ class SecureChannel:
         
         key= self.derived_key
         iv= urandom(12)+(self.sc_IVcounter).to_bytes(4, byteorder='big')
-        
-        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
-        aes = pyaes.Encrypter(aes_cbc, padding=pyaes.PADDING_DEFAULT)
-        ciphertext = aes.feed(data_bytes) + aes.feed()
-        
+        ciphertext = aes_encrypt_with_iv(key, iv, data_bytes)
+
         self.sc_IVcounter+=2
         
         data_to_mac= iv + len(ciphertext).to_bytes(2, byteorder='big') + ciphertext
@@ -91,17 +83,7 @@ class SecureChannel:
             raise UninitializedSecureChannelError('Secure channel is not initialized')
         
         key= self.derived_key
-        
-        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
-        aes = pyaes.Decrypter(aes_cbc, padding=pyaes.PADDING_DEFAULT)
-        decrypted = aes.feed(ciphertext) + aes.feed() 
-        
-        # #remove padding (already done with PADDING_DEFAULT)
-        # #logger.debug(f'Plaintext with padding: {toHexString(plaintext)}')
-        # plaintext= list(plaintext)
-        # pad= plaintext[-1]
-        # plaintext=plaintext[0:-pad]
-        # #logger.debug(f'Plaintext without padding: {toHexString(plaintext)}')
+        decrypted = aes_decrypt_with_iv(key, iv, ciphertext)
         
         return list(decrypted)
             
