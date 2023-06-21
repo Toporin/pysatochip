@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5]:
+
+### Changed 
+
+ - Remove pyopenssl from dependencies
+ - Use cryptography package to verify certificates chain
+ - Remove pyaes (mandatory) dependency for AES, use cryptography instead 
+ - If present, pyaes and Cryptodome can also be used
+
 ## [0.12.4]:
 
 ### Changed 
