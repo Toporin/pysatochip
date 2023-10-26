@@ -613,7 +613,7 @@ class CardConnector:
         if type(pin) is str:
             pin= list(pin.encode('utf-8'))
         elif type(pin) is bytes:
-            seed= list(seed)
+            pin= list(pin)
         
         if type(hmac) is str:
             hmac= list(bytes.fromhex(hmac))
@@ -1240,6 +1240,7 @@ class CardConnector:
         return
             
     def set_pin(self, pin_nbr, pin):
+        # pin should be a list of bytes 
         self.pin_nbr=pin_nbr
         self.pin=pin
         return
