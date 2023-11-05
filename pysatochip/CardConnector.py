@@ -11,13 +11,13 @@ from .CardDataParser import CardDataParser
 from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
-from .util import msg_magic, sha256d, hash_160, EncodeBase58Check
+from .util import msg_magic, sha256d, hash_160, EncodeBase58Check, dict_swap_keys_values
 from .certificate_validator import CertificateValidator
 
 import hashlib
 import hmac
 import base64
-import logging 
+import logging
 from os import urandom
 
 #debug
@@ -90,6 +90,7 @@ class RemovalObserver(CardObserver):
     def update(self, observable, actions):
         (addedcards, removedcards) = actions
         for card in addedcards:
+            if card.atr == [59, 141, 1, 128, 251, 160, 0, 0, 3, 151, 66, 84, 70, 89, 4, 1, 207]: continue # Ignore Windows Hello for Business virtual device (3B 8D 01 80 FB A0 00 00 03 97 42 54 46 59 04 01 CF)
             #TODO check ATR and check if more than 1 card?
             logger.info(f"+Inserted: {toHexString(card.atr)}")
             self.cc.card_present= True
@@ -230,10 +231,12 @@ class CardConnector:
             # TODO: manage errors in calling methods?
             elif (sw1==0x9c) and (sw2==0x10):
                 raise IncorrectP1Error("APDU error: wrong P1 parameters", ins= ins)
+            elif (sw1 == 0x9c) and (sw2 == 0x50):
+                raise IncorrectUnlockCounterError("Satodime error: incorrect unlock counter", ins=ins)
             elif (sw1==0x9c) and (sw2==0x51):
-                raise IncorrectUnlockCodeError("Satodime error: incorrect unlock code", ins= ins)
+                raise IncorrectUnlockCodeError("Satodime error: incorrect unlock secret", ins= ins)
             elif (sw1==0x9c) and (sw2==0x52):
-                raise IncorrectKeyslotStateError("Satodime error: incorrect keyslot state", ins= ins)
+                raise IncorrectKeyslotStateError("Satodime error: incorrect keyslot state for this operation", ins= ins)
             elif (sw1==0x9c) and (sw2==0x53):
                 raise IncorrectProtocolMediaError("Satodime error: incorrect protocol media", ins= ins)
             elif (sw1==0x9c) and (sw2==0x54):
@@ -245,7 +248,7 @@ class CardConnector:
                 
         # no card present
         raise CardNotPresentError('No card found! Please insert card!')
-        
+
     def card_get_ATR(self):
         logger.debug('In card_get_ATR()')
         return self.cardservice.connection.getATR()
@@ -666,7 +669,10 @@ class CardConnector:
             return 65*'00'
         if (sw1==0x6D and sw2==0x00): # instruction not supported
             return 65*'FF'
-        
+
+        if self.parser.authentikey is None:
+            self.parser.authentikey = self.card_export_authentikey()
+
         pubkey_hex=self.parser.get_trusted_pubkey(response)
         return pubkey_hex
     
@@ -1115,6 +1121,15 @@ class CardConnector:
         (response, sw1, sw2) = self.card_transmit(apdu)
         if (sw1==0x90) and (sw2==0x00):
             self.needs_2FA= True
+        elif (sw1==0x9C and sw2==0x18):
+            logger.error(f"Error during 2fa import: card already requires 2FA (0x9C18)")
+            raise CardError('Import failed: card already requires 2FA (0x9C18)!')
+        elif (sw1==0x6D and sw2==0x00):
+            logger.error(f"Error during 2fa import: command unsupported(0x6D00")
+            raise CardError(f"Error during 2fa import: command unsupported (0x6D00)")
+        else:
+            logger.error(f'Unexpected error code: {hex(256*sw1+sw2)}')
+            raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
         return (response, sw1, sw2)
 
     def card_reset_2FA_key(self, chalresponse):
@@ -1288,7 +1303,7 @@ class CardConnector:
                     msg = f'Enter the PIN for your {self.card_type}:'
                     (is_PIN, pin_0)= self.client.PIN_dialog(msg) #todo: use request?
                 if is_PIN is False:
-                    raise RuntimeError(('Device cannot be unlocked without PIN code!'))
+                    raise RuntimeError(('Device cannot be unlocked without correct PIN code!'))
                 pin_0=list(pin_0)
             else:
                 pin_0= self.pin
@@ -1644,6 +1659,10 @@ class CardConnector:
         return id, fingerprint_from_seedkeeper
         
     def seedkeeper_export_secret(self, sid, sid_pubkey= None):
+        # Initialise self.parser.authentikey if not done already (If it is none, this function will crash)
+        if self.parser.authentikey is None:
+            self.card_bip32_get_authentikey()
+
         logger.debug("In seedkeeper_export_secret")
         
         is_secure_export= False if (sid_pubkey is None) else True
@@ -1673,6 +1692,8 @@ class CardConnector:
             logger.warning("Export failed: lock error - try again")
             #TODO: try again?
             raise SeedKeeperError("Export failed: lock error - try again")
+        elif (sw1 == 0x9c and sw2 == 0x0f):
+            raise SeedKeeperError("Export failed: Invalid Pubkey Selected")
         else:
             logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
             raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
@@ -1837,17 +1858,14 @@ class CardConnector:
         return (logs, nbtotal_logs, nbavail_logs)
     
     def make_header(self, secret_type, export_rights, label):
-        dic_type= {'BIP39 mnemonic':0x30, 'Electrum mnemonic':0x40, 'Masterseed':0x10, 'Secure import from json':0x00, 
-                                'Public Key':0x70, 'Authentikey from TrustStore':0x70, 'Password':0x90, 'Authentikey certificate':0xA0, '2FA secret':0xB0}
-        dic_export_rights={'Export in plaintext allowed':0x01 , 'Export encrypted only':0x02}
         id=2*[0x00]
         if type(secret_type) is str:
-            itype= dic_type[secret_type]
+            itype= dict_swap_keys_values(SEEDKEEPER_DIC_TYPE)[secret_type]
         else:
             itype= secret_type
         origin= 0x00
         if type(export_rights) is str:
-            export= dic_export_rights[export_rights]
+            export= dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
         else:
             export= export_rights
         export_counters=3*[0x00]
@@ -1879,7 +1897,55 @@ class CardConnector:
             logger.error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
             raise UnexpectedSW12Error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
         return response
-    
+
+    def card_import_perso_certificate(self, cert):
+        ''' Import a personalisation certificate into the device.
+
+        Parameters:
+        the device certificate (base64 encoded)
+
+        '''
+        logger.debug("In card_import_perso_certificate")
+        cert = list(base64.b64decode(cert))
+
+        # data is cut into chunks, each processed in a different APDU call
+        buffer_offset = 0
+        buffer_left = len(cert)
+
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_IMPORT_PKI_CERTIFICATE
+        p1 = 00
+        p2 = JCconstants.OP_INIT
+        #data(init): [full_size(2b)]
+        data = list(buffer_left.to_bytes(2, byteorder='big', signed=False))
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        (response, sw1, sw2) = self.card_transmit(apdu)
+        if (sw1==0x9c and sw2==0x40):
+            logger.error("Error: Card PKI Already Locked")
+
+        while buffer_left > 0:
+            # cla= JCconstants.CardEdge_CLA
+            # ins= INS_IMPORT_PKI_CERTIFICATE
+            # p1= 00
+            p2 = JCconstants.OP_PROCESS
+            #data(update): [chunk_offset(2b) | chunk_size(2b) | chunk_data ]
+            data = []
+            data += list(buffer_offset.to_bytes(2, byteorder='big', signed=False))
+            chunk_size = min(128, buffer_left)
+            data += list(chunk_size.to_bytes(2, byteorder='big', signed=False))
+            data += cert[buffer_offset:(buffer_offset + chunk_size)]
+            lc = len(data)
+            apdu = [cla, ins, p1, p2, lc] + data
+            buffer_offset += chunk_size
+            buffer_left -= chunk_size
+            response, sw1, sw2 = self.card_transmit(apdu)
+            if sw1!=0x90 or sw2!=0x00:
+                logger.error("APDU Send Failed")
+                break
+
+        return
+
     def card_export_perso_certificate(self):
         logger.debug("In card_export_perso_certificate")
         cla= JCconstants.CardEdge_CLA
@@ -1972,19 +2038,11 @@ class CardConnector:
         
         if txt_error!="":
             return False, "(empty)", "(empty)", "(empty)", txt_error
-        
-        # check the certificate chain from root CA to device
-        validator= CertificateValidator()
-        is_valid_chain, device_pubkey, txt_ca, txt_subca, txt_device, txt_error= validator.validate_certificate_chain(cert_pem, self.card_type)
-        if not is_valid_chain:
-            return False, txt_ca, txt_subca, txt_device, txt_error
-        
-        # perform challenge-response with the card to ensure that the key is correctly loaded in the device
-        is_valid_chalresp, txt_error = self.card_challenge_response_pki(device_pubkey)
-        if not is_valid_chalresp:
-            return False, txt_ca, txt_subca, txt_device, txt_error
-            
-        # TODO: verify that device subject matches card serial number
+
+        # Perform some checks on the certificate
+        validator = CertificateValidator()
+
+        # Check that the certificate subject matches the device serial number
         cert_dict =  validator.parse_pem_certificate(cert_pem)
         subject_dict= cert_dict['subject']
         logger.debug(f'In card_verify_authenticity subject_dict= {subject_dict}')
@@ -1996,7 +2054,17 @@ class CardConnector:
         else:
             is_valid_serial_number= False
             txt_error= f"Certificate subject {subject} does not match the card serial number {self.UID_SHA1}!"
+
+        ## check the certificate chain from root CA to device
+        is_valid_chain, device_pubkey, txt_ca, txt_subca, txt_device, txt_error= validator.validate_certificate_chain(cert_pem, self.card_type)
+        if not is_valid_chain:
+            return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
         
+        # perform challenge-response with the card to ensure that the key is correctly loaded in the device
+        is_valid_chalresp, txt_error = self.card_challenge_response_pki(device_pubkey)
+        if not is_valid_chalresp:
+            return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
+
         return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
     
     #################################
@@ -2138,6 +2206,9 @@ class CardConnector:
     
         apdu=[cla, ins, p1, p2]
         (response, sw1, sw2)= self.card_transmit(apdu)
+
+        if self.parser.authentikey is None: # Need to cache the pubkey if this hasn't been done already
+            self.card_export_authentikey()
         
         # parse answer
         (pubkey_list, pubkey_comp_list, sig_list)= self.parser.parse_satodime_get_pubkey(response)
@@ -2161,13 +2232,17 @@ class CardConnector:
             raise Exception(f"Error in satodime_seal_key: wrong data length {len(data)} instead of {datasize}")
         apdu=apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
-                
+        self.satodime_increment_unlock_counter()
+
+        if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
+            self.card_export_authentikey()
+
         # parse answer
-        (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
-        
+        (entropy_list, privkey_list, sig_list) = self.parser.parse_satodime_get_privkey(response, key_nbr)
+
         return (response, sw1, sw2, entropy_list, privkey_list)
-    
+
+
     def satodime_seal_key(self, key_nbr: int, entropy_user):
     
         logger.debug("In satodime_seal_key")
@@ -2189,8 +2264,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
-        
+        self.satodime_increment_unlock_counter()
+
+        if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
+            self.card_export_authentikey()
         # parse answer
         (pubkey_list, pubkey_comp_list, sig_list)= self.parser.parse_satodime_get_pubkey(response)
         
@@ -2215,7 +2292,10 @@ class CardConnector:
         
         (response, sw1, sw2)= self.card_transmit(apdu)
         self.satodime_increment_unlock_counter() 
-        
+
+        if self.parser.authentikey is None: # Need to cache the pubkey if this hasn't been done already
+            self.card_export_authentikey()
+
         # parse answer
         (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
         
