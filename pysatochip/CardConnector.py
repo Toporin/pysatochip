@@ -2049,23 +2049,21 @@ class CardConnector:
         subject= subject_dict.get(b'CN', None).decode('utf-8')
         logger.debug(f'In card_verify_authenticity subject= {subject}')
         logger.debug(f'In card_verify_authenticity UID_SHA1= {self.UID_SHA1}')
-        if subject.lower() == self.UID_SHA1.lower():
-            is_valid_serial_number= True
-        else:
-            is_valid_serial_number= False
+        if subject.lower() != self.UID_SHA1.lower():
             txt_error= f"Certificate subject {subject} does not match the card serial number {self.UID_SHA1}!"
+            return False, txt_ca, txt_subca, txt_device, txt_error
 
         ## check the certificate chain from root CA to device
         is_valid_chain, device_pubkey, txt_ca, txt_subca, txt_device, txt_error= validator.validate_certificate_chain(cert_pem, self.card_type)
         if not is_valid_chain:
-            return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
+            return False, txt_ca, txt_subca, txt_device, txt_error
         
         # perform challenge-response with the card to ensure that the key is correctly loaded in the device
         is_valid_chalresp, txt_error = self.card_challenge_response_pki(device_pubkey)
         if not is_valid_chalresp:
-            return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
+            return False, txt_ca, txt_subca, txt_device, txt_error
 
-        return is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error
+        return True, txt_ca, txt_subca, txt_device, txt_error
     
     #################################
     #                  SATODIME                   #
