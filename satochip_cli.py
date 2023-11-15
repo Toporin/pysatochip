@@ -27,9 +27,11 @@ from pysatochip.CardConnector import CardConnector, UninitializedSeedError, Seed
 from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-from pysatochip.util import msg_magic, list_hypenated_values, mnemonic_to_masterseed, dict_swap_keys_values
+from pysatochip.util import msg_magic, list_hypenated_values, dict_swap_keys_values
 from pysatochip.FactoryReset import CardConnector as Reset_CardConnector
 from pysatochip.SecretDecryption import Decrypt_Secret
+from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
+from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
 
 # CardConnector Object used by everything
 global cc
@@ -37,6 +39,23 @@ global cc
 logging.basicConfig(level=logging.ERROR, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
 logger = logging.getLogger(__name__)
 logger.warning("loglevel: "+ str(logger.getEffectiveLevel()) )
+
+def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
+    print(mnemonic_type)
+    if "BIP39" in mnemonic_type:
+        mnemonic_obj = Mnemonic("english")
+        if mnemonic_obj.check(bip39_mnemonic):
+            mnemonic_masterseed = Mnemonic.to_seed(bip39_mnemonic, bip39_passphrase)
+        else:
+            raise Exception("Invalid Mnemonic Checksum (Perhaps an Electrum seed?)")
+
+    if "Electrum" in mnemonic_type:
+        if len(electrum_seedtype(bip39_mnemonic)) > 0:
+            mnemonic_masterseed = electrum_mnemonic.mnemonic_to_seed(bip39_mnemonic, bip39_passphrase)
+        else:
+            raise Exception("Invalid Mnemonic Checksum (Perhaps an BIP39 seed?)")
+
+    return mnemonic_masterseed
 
 def do_challenge_response(msg):
     (id_2FA, msg_out) = cc.card_crypt_transaction_2FA(msg, True)
