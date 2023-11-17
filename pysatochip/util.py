@@ -131,5 +131,5 @@ def base_encode(v: bytes, *, base: int) -> str:
 def dict_swap_keys_values(dictionary):
     return {value: key for key, value in dictionary.items()}
 
-def list_hypenated_values(dictionary):
+def list_hyphenated_values(dictionary):
     return [value.replace(" ", "_") for key, value in dictionary.items()]

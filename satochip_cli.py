@@ -27,7 +27,7 @@ from pysatochip.CardConnector import CardConnector, UninitializedSeedError, Seed
 from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-from pysatochip.util import msg_magic, list_hypenated_values, dict_swap_keys_values
+from pysatochip.util import msg_magic, list_hyphenated_values, dict_swap_keys_values
 from pysatochip.SecretDecryption import Decrypt_Secret
 from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
 from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
@@ -610,8 +610,8 @@ def satochip_reset_factory():
 @click.option("--size", type=int, default=64, help="Size (In Bytes) of the Masterseed (BIP39 default is 64 Bytes)")
 def seedkeeper_generate_masterseed(label, export_rights, size):
     """Generate a Masterseed On-Card"""
-    if export_rights not in list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
-        print("INVALID EXPORT RIGHTS, must be one of:", list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
+    if export_rights not in list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
+        print("INVALID EXPORT RIGHTS, must be one of:", list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
         exit()
 
     export_rights = export_rights.replace("_", " ")
@@ -628,8 +628,8 @@ def seedkeeper_generate_masterseed(label, export_rights, size):
 @click.option("--export-rights", required=True, help="Export Rights for the secret")
 def seedkeeper_generate_2fa_secret(label, export_rights):
     """Generate a 2fa Secret On-Card"""
-    if export_rights not in list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
-        print("INVALID EXPORT RIGHTS, must be one of:", list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
+    if export_rights not in list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
+        print("INVALID EXPORT RIGHTS, must be one of:", list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
         exit()
 
     export_rights = export_rights.replace("_", " ")
@@ -654,12 +654,12 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
     #todo: check pin 
 
     # Check if secret type and export rights are valid options
-    if type not in list_hypenated_values(SEEDKEEPER_DIC_TYPE):
-        print("INVALID SECRET TYPE, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_TYPE))
+    if type not in list_hyphenated_values(SEEDKEEPER_DIC_TYPE):
+        print("INVALID SECRET TYPE, must be one of:",list_hyphenated_values(SEEDKEEPER_DIC_TYPE))
         exit()
 
-    if export_rights not in list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
-        print("INVALID EXPORT RIGHTS, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
+    if export_rights not in list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
+        print("INVALID EXPORT RIGHTS, must be one of:",list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
         exit()
 
     # Swap underscores for spaces... Simplest solution to keep click happy and still use types directly from the dictionaries
