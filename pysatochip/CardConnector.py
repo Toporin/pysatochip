@@ -1090,7 +1090,7 @@ class CardConnector:
     #                         2FA commands                        #
     ###########################################
      
-    def card_set_2FA_key(self, hmacsha160_key, amount_limit):
+    def card_set_2FA_key(self, hmacsha160_key, amount_limit=0):
         ''' Enable and import 2FA in the device
         
         Parameters: 
@@ -1293,20 +1293,24 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         return (response, sw1, sw2)
 
-    def card_verify_PIN(self):
+    def card_verify_PIN(self, pin = None):
         logger.debug("In card_verify_PIN")
         
         while (self.card_present):
-            if self.pin is None:
-                is_PIN= False
-                if self.client is not None:
-                    msg = f'Enter the PIN for your {self.card_type}:'
-                    (is_PIN, pin_0)= self.client.PIN_dialog(msg) #todo: use request?
-                if is_PIN is False:
-                    raise RuntimeError(('Device cannot be unlocked without correct PIN code!'))
-                pin_0=list(pin_0)
+            if pin is None:
+                if self.pin is None:
+                    is_PIN= False
+                    if self.client is not None:
+                        msg = f'Enter the PIN for your {self.card_type}:'
+                        (is_PIN, pin_0)= self.client.PIN_dialog(msg) #todo: use request?
+                    if is_PIN is False:
+                        raise RuntimeError(('Device cannot be unlocked without correct PIN code!'))
+                    pin_0=list(pin_0)
+                else:
+                    pin_0= self.pin
             else:
-                pin_0= self.pin
+                pin_0= list(bytes(pin, "utf-8"))
+
             cla= JCconstants.CardEdge_CLA
             ins= JCconstants.INS_VERIFY_PIN
             apdu=[cla, ins, 0x00, 0x00, len(pin_0)] + pin_0
@@ -1317,10 +1321,11 @@ class CardConnector:
             
             # correct PIN: cache PIN value
             if sw1==0x90 and sw2==0x00: 
-                self.set_pin(0, pin_0) 
+                self.set_pin(0, pin_0) # cache value for future use
                 return (response, sw1, sw2)     
             # wrong PIN, get remaining tries available (since v0.11)
             elif sw1==0x63 and (sw2 & 0xc0)==0xc0:
+                pin = None # reset provided pin
                 self.set_pin(0, None) #reset cached PIN value
                 pin_left= (sw2 & ~0xc0)
                 msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
@@ -1328,6 +1333,7 @@ class CardConnector:
                     self.client.request('show_error', msg)
             # wrong PIN (legacy before v0.11)    
             elif sw1==0x9c and sw2==0x02:
+                pin = None # reset provided pin
                 self.set_pin(0, None) #reset cached PIN value
                 (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
                 pin_left= d.get("PIN0_remaining_tries",-1)

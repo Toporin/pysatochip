@@ -18,9 +18,9 @@
 
 import click, logging, time, binascii, json, hashlib, base64, sys
 from os import urandom
+from getpass import getpass
 
 from ecdsa import SigningKey, SECP256k1, ECDH
-
 from mnemonic import Mnemonic
 
 from pysatochip.CardConnector import CardConnector, UninitializedSeedError, SeedKeeperError, IncorrectUnlockCodeError, IncorrectP1Error, IncorrectUnlockCounterError, IncorrectKeyslotStateError, IncorrectProtocolMediaError
@@ -28,7 +28,6 @@ from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
 from pysatochip.util import msg_magic, list_hypenated_values, dict_swap_keys_values
-from pysatochip.FactoryReset import CardConnector as Reset_CardConnector
 from pysatochip.SecretDecryption import Decrypt_Secret
 from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
 from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
@@ -36,9 +35,9 @@ from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
 # CardConnector Object used by everything
 global cc
 
-logging.basicConfig(level=logging.ERROR, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
 logger = logging.getLogger(__name__)
-logger.warning("loglevel: "+ str(logger.getEffectiveLevel()) )
+logger.setLevel(logging.WARNING)
 
 def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
     print(mnemonic_type)
@@ -106,11 +105,18 @@ class AliasedGroup(click.Group):
         _, cmd, args = super().resolve_command(ctx, args)
         return cmd.name, cmd, args
 
+
 @click.command(cls=AliasedGroup)
+@click.option("--verbose", is_flag=True, help="Provide detailed logs")
 @click.option("--devicefilter", default=None, help="Filter only certain devices [satochip, seedkeeper, satodime]")
-@click.option("--enablefactoryreset", is_flag=True, help="Enable Satochip Factory Reset Mode (Factory Reset command will fail without this)")
-@click.option("--pin", default=None, help="Device PIN (required for some operations)")
-def main(devicefilter, enablefactoryreset, pin):
+def main(verbose, devicefilter):
+
+    loglevel = logging.WARNING
+    if verbose:
+        loglevel = logging.DEBUG
+        logger.setLevel(loglevel)
+        logger.debug("In main()")
+
     # Unless devicefilter has been specified, infer it based off the command (if possible)
     if not devicefilter:
         command_type = sys.argv[1].split("-")[0]
@@ -120,35 +126,31 @@ def main(devicefilter, enablefactoryreset, pin):
     if "util-" not in sys.argv[1][:5]:
         global cc
         # Connect to the card and get ready for a command
-        if enablefactoryreset:
-            cc = Reset_CardConnector(None, logger.getEffectiveLevel())
-        else:
-            cc = CardConnector(None, logger.getEffectiveLevel(), devicefilter)
+        cc = CardConnector(None, loglevel, devicefilter)
 
-            time.sleep(1)  # give some time to initialize reader...
-            try:
-                status = cc.card_get_status()
-            except Exception:
-                logger.critical("Card Connect Failed")
-                exit()
+        time.sleep(1)  # give some time to initialize reader...
+        try:
+            status = cc.card_get_status()
+        except Exception:
+            logger.critical("Card Connect Failed")
+            exit()
 
-            if (cc.needs_secure_channel):
-                cc.card_initiate_secure_channel()
+        if (cc.needs_secure_channel):
+            cc.card_initiate_secure_channel()
 
-            if status[3]['setup_done'] == False and cc.card_type != "Satodime":
-                print()
-                print("WARNING: Card Setup Not Complete, operating with default PIN")
-                print(" (This state is only useful for Personalisation of PKI)")
-                print("CARD NOT SAFE TO USE UNTIL SETUP COMPLETE")
-                print("RUN CARD SETUP UNLESS YOU KNOW EXACTLY WHAT YOU ARE DOING!!!")
-                print()
-                cc.set_pin(0, [0x4D, 0x75, 0x73, 0x63, 0x6C, 0x65, 0x30, 0x30]) #Default card PIN
-
-            if pin:
-                cc.set_pin(0,list(bytes(pin, "utf-8")))
+        if status[3]['setup_done'] == False and cc.card_type != "Satodime":
+            print()
+            print("WARNING: Card Setup Not Complete, operating with default PIN")
+            print(" (This state is only useful for Personalisation of PKI)")
+            print("CARD NOT SAFE TO USE UNTIL SETUP COMPLETE")
+            print("RUN CARD SETUP UNLESS YOU KNOW EXACTLY WHAT YOU ARE DOING!!!")
+            print()
+            cc.set_pin(0, [0x4D, 0x75, 0x73, 0x63, 0x6C, 0x65, 0x30, 0x30]) #Default card PIN
 
     else:
         pass
+
+    logger.debug("In main() end")
 
 @main.command()
 def common_get_card_type():
@@ -156,7 +158,7 @@ def common_get_card_type():
     print(cc.card_type)
 
 @main.command()
-@click.option("--plain_apdu", default=None, help="APDU to Transmit (List of Bytes)")
+@click.option("--plain-apdu", default=None, help="APDU to Transmit (List of Bytes)")
 def common_transmit(plain_apdu):
     """Transmits a plain APDU"""
     print(cc.card_transmit(plain_apdu))
@@ -196,6 +198,9 @@ def common_get_card_status():
 def common_get_card_label():
     """Retrieves the plain text label for the card"""
     try:
+        if cc.card_type != "Satodime":
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
         (response, sw1, sw2, label) = cc.card_get_label()
         print("Device Label:", label)
     except Exception as e:
@@ -206,6 +211,10 @@ def common_get_card_label():
 def common_set_card_label(label):
     """Sets a plain text label for the card (Optional)"""
     try:
+        if cc.card_type != "Satodime":
+            # TODO: for satodime, may fail if performed via NFC (needs ownership)
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
         (response, sw1, sw2) = cc.card_set_label(label)
         if sw1 != 0x90 or sw2 != 0x00:
             print("ERROR: Set Label Failed")
@@ -216,16 +225,17 @@ def common_set_card_label(label):
 
 @main.command()
 @click.option("--label", default="", help="Card Label")
-@click.option("--pin", help="Card PIN")
 @click.option("--satodime", is_flag=True, help="Card PIN")
-def common_initial_setup(label, pin, satodime):
+def common_initial_setup(label, satodime):
     """Run the initial card setup process"""
     if satodime:
         pin_0 = list("1234".encode('utf8')) # This isn't actually used in Satodime, so can be anything
-    elif pin is None:
-        print("ERROR: For Satochip or Seedkeeper you need to supply a pin (with the --pin argument) or indicate that you are setting up a satodime (with the --satodime argument)")
-        exit()
     else:
+        pin = getpass("Enter your PIN:")
+        pin2 = getpass("Enter your PIN again to confirm:")
+        if pin != pin2:
+            print("ERROR! The two PINs provided do not match! ")
+            exit()
         pin_0 = list(pin.encode('utf8'))
 
     # Just stick with the defaults from SeedKeeper tool
@@ -270,10 +280,12 @@ def common_initial_setup(label, pin, satodime):
         common_set_card_label(["--label", label])
 
 @main.command()
-@click.option("--passphrase", default="", help="(Optional) BIP39 Passphrase")
-def satochip_import_new_mnemonic(passphrase):
+@click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
+def satochip_import_new_mnemonic(use_passphrase):
     """Generates and imports a new BIP39 mnemonic to the SatoChip Device"""
     if click.confirm("WARNING: This tool should only be used to generate a new seed if run in a secure, offline environment. (Like TAILS Linux)  \nAre you sure that you want to do this?", default=False):
+        if use_passphrase:
+            passphrase = input("Enter your passphrase:")
         mnemo = Mnemonic("english")
         words = mnemo.generate(strength=256)
         seed = mnemo.to_seed(words, passphrase=passphrase)
@@ -284,58 +296,72 @@ def satochip_import_new_mnemonic(passphrase):
                 "WARNING: These seed words are your wallet, back them up in a secure, offline place and don't share them with anyone.  \nConfirm when you have written them down",
                 default=False):
             try:
+                pin = getpass("Enter your PIN:")
+                cc.card_verify_PIN(pin)
                 cc.card_bip32_import_seed(seed)
                 print("Seed Successfully Imported")
             except Exception as e:
                 print(e)
 
 @main.command()
-@click.option("--seed", required=True, default=None, help="BIP39 Seed hex (Masterseed)")
-def satochip_import_unencrypted_masterseed(seed):
+def satochip_import_unencrypted_masterseed():
     """Imports a BIP39 Seed (In Hexidecimal Format) to the SatoChip Device"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        seed = input("Enter your BIP39 Seed hex (Masterseed):") 
         cc.card_bip32_import_seed(seed)
         print("Seed Successfully Imported")
     except Exception as e:
         print(e)
 
 @main.command()
-@click.option("--mnemonic", required=True, help="The Secret itself")
-@click.option("--passphrase", default="", help="(Optional) Additional BIP39 Passphrase to store for mnemonics (Also Known as Extra Words in Electrum)")
+@click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
 @click.option("--electrum", is_flag=True, help="Treat the seed as an Electrum Type seed (As opposed to BIP39)")
-def satochip_import_unencrypted_mnemonic(mnemonic, passphrase, electrum):
+def satochip_import_unencrypted_mnemonic(use_passphrase, electrum):
     """Imports a mnemonic Seed (In Electrum or BIP39 Format) to the SatoChip Device"""
-    mnemonic_type = "BIP39"
     try:
-        if electrum: mnemonic_type = "Electrum"
-        seed = mnemonic_to_masterseed(mnemonic, passphrase,mnemonic_type)
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        mnemonic_type = "BIP39"
+        if electrum: 
+            mnemonic_type = "Electrum"
+        mnemonic = input("Enter your mnemonic seed:") 
+        if use_passphrase:
+            passphrase = input("Enter your passphrase:") 
+        seed = mnemonic_to_masterseed(mnemonic, passphrase, mnemonic_type)
         cc.card_bip32_import_seed(seed)
         print("Seed Successfully Imported")
     except Exception as e:
         print(e)
 
 @main.command()
-@click.option("--encrypted-secret-file", required=True, help="A file containing the encrypted JSON Masterseed (Returned by seedkeeper_export_secret())")
-def satochip_import_encrypted_masterseed(encrypted_secret_file):
+@click.option("--json-file", required=True, help="A file containing the encrypted JSON Masterseed (Returned by seedkeeper_export_secret())")
+def satochip_import_encrypted_masterseed(json_file):
     """Imports an encrypted seed backup. (The type typically exported from a SeedKeeper device)"""
-    f = open(encrypted_secret_file)
-    secret_json = json.load(f)
-
     try:
+        f = open(json_file)
+        secret_json = json.load(f)
+
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         cc.card_import_encrypted_secret(secret_json['secrets'][0])
         print("Success: Masterseed Imported")
     except Exception as e:
         print(e)
 
 @main.command()
-@click.option("--encrypted-secret-file", required=True, help="A file containing the encrypted JSON 2FA key (Returned by seedkeeper_export_secret())")
-def satochip_import_encrypted_2fa_key(encrypted_secret_file):
+@click.option("--json-file", required=True, help="A file containing the encrypted JSON 2FA key (Returned by seedkeeper_export_secret())")
+def satochip_import_encrypted_2fa_key(json_file):
     """Imports an encrypted seed backup. (The type typically exported from a SeedKeeper device)"""
     if click.confirm("WARNING: This will import AND enable 2FA on your Satochip device using the key provided. \nAre you sure that you want to do this?", default=False):
-        f = open(encrypted_secret_file)
-        secret_json = json.load(f)
-
         try:
+            f = open(json_file)
+            secret_json = json.load(f)
+
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
             cc.card_import_encrypted_secret(secret_json['secrets'][0])
             print("Success: 2FA Key Imported and Enabled")
         except Exception as e:
@@ -346,6 +372,8 @@ def satochip_import_encrypted_2fa_key(encrypted_secret_file):
 def satochip_import_trusted_pubkey(pubkey):
     """Imports a trusted pubkey"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         cc.card_import_trusted_pubkey(pubkey)
     except Exception as e:
         print(e)
@@ -354,6 +382,8 @@ def satochip_import_trusted_pubkey(pubkey):
 def satochip_export_trusted_pubkey():
     """Exports the current trusted pubkey"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         print(cc.card_export_trusted_pubkey())
     except Exception as e:
         print(e)
@@ -362,6 +392,8 @@ def satochip_export_trusted_pubkey():
 def common_export_authentikey():
     """Exports the device Authentikey"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         print(cc.card_export_authentikey().get_public_key_hex(False))
     except Exception as e:
         print(e)
@@ -371,6 +403,8 @@ def satochip_reset_seed():
     """Wipes the seed that is currently on the device."""
     if click.confirm("Are you sure that you want to wipe the device seed? (This will cause an UNRECOVERABLE LOSS OF FUNDS if you don't have a working backup", default=False):
         try:
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
             if cc.needs_2FA:
                 cc.card_bip32_get_authentikey()
                 authentikeyx = bytearray(cc.parser.authentikey_coordx).hex()
@@ -397,15 +431,19 @@ def satochip_reset_seed():
 def satochip_bip32_get_authentikey():
     """Export the BIP32 Authentikey"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         print(cc.card_bip32_get_authentikey().get_public_key_hex(False))
     except Exception as e:
         print(e)
 
 @main.command()
-@click.option("--path", default="m/44'/0'/0'/0", help="path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)")
+@click.option("--path", default="m/44'/0'/0'/0", help="path (str | bytes): the BIP32 path; if given as a string, it will be converted to bytes (4 bytes for each path index)")
 def satochip_bip32_get_extendedkey(path):
     """Get extended pubkey and chaincode for a given derivation path (m/44'/0'/0'/0 by default)"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         (key, chaincode) = cc.card_bip32_get_extendedkey(path)
         print("Key: ", key.get_public_key_hex(True))
         print("Chaincode: ", chaincode.hex())
@@ -413,38 +451,43 @@ def satochip_bip32_get_extendedkey(path):
         print(e)
 
 @main.command()
-@click.option("--path", default="m/44'/0'/0'/0", help="The path to retrieve the xpub for")
+@click.option("--path", default="m/44'/0'/0'/0", help="The BIP32 path to retrieve the xpub for")
 @click.option("--xtype", default="standard", help="xtype (str): the type of transaction such as  'standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh'")
-@click.option("--is_mainnet", default=True, help="is_mainnet (bool): is mainnet or testnet")
+@click.option("--is-mainnet", default=True, help="is_mainnet (bool): is mainnet or testnet")
 def satochip_bip32_get_xpub(path, xtype, is_mainnet):
     """Get extended public key (xpub) for a given derivation path (m/44'/0'/0'/0 by default) and script type (p2pkh by default)"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         print(cc.card_bip32_get_xpub(path, xtype, is_mainnet))
     except Exception as e:
         print(e)
 
 @main.command()
-@click.option("--address-path", default="m/44'/0'/0'/0/0", help="path: the full address path")
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
 @click.option("--message", required=True, help="The message to sign")
-def satochip_sign_message(address_path, message):
+def satochip_sign_message(path, message):
     """Sign a Message with the Satochip"""
     message_byte = message.encode('utf8')
 
-     # check if 2FA is required
-    hmac=b''
-    if (cc.needs_2FA==None):
-        (response, sw1, sw2, d)=client.cc.card_get_status()
-    if cc.needs_2FA:
-        # challenge based on sha256(btcheader+msg)
-        # format & encrypt msg
-        msg= {'action':"sign_msg", 'msg':message}
-        msg=  json.dumps(msg)
-        #do challenge-response with 2FA device...
-        hmac= do_challenge_response(msg)
-        hmac= bytes.fromhex(hmac)
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        hmac=b''
+        if (cc.needs_2FA==None):
+            (response, sw1, sw2, d)=client.cc.card_get_status()
+        if cc.needs_2FA:
+            # challenge based on sha256(btcheader+msg)
+            # format & encrypt msg
+            msg= {'action':"sign_msg", 'msg':message}
+            msg=  json.dumps(msg)
+            #do challenge-response with 2FA device...
+            hmac= do_challenge_response(msg)
+            hmac= bytes.fromhex(hmac)
+        # derive key and sign message
         keynbr= 0xFF #for extended key
-        (depth, bytepath)= cc.parser.bip32path2bytes(address_path)
+        (depth, bytepath)= cc.parser.bip32path2bytes(path)
         (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
         (response2, sw1, sw2, compsig) = cc.card_sign_message(keynbr, pubkey, message_byte, hmac)
         if (compsig==b''):
@@ -456,13 +499,15 @@ def satochip_sign_message(address_path, message):
         print(e)
 
 @main.command()
-@click.option("--key", required=True, help="The 20 byte key to be used for 2FA")
-@click.option("--threshold", default=0, help="The threshold (in sats) above which 2fa is required for a transaction")
-def satochip_import_unencrypted_2fa_key(key, threshold):
+def satochip_import_unencrypted_2fa_key():
     """Imports an encrypted seed backup. (The type typically exported from a SeedKeeper device)"""
     try:
         if click.confirm("WARNING: This will import AND enable 2FA on your Satochip device using the key provided. \nAre you sure that you want to do this?", default=False):
-            cc.card_set_2FA_key(key, threshold)
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+            
+            key = input("Enter your 2FA key (in hex):")
+            cc.card_set_2FA_key(key)
             print("Success: 2FA Key Imported and Enabled")
     except Exception as e:
         print(e)
@@ -471,6 +516,8 @@ def satochip_import_unencrypted_2fa_key(key, threshold):
 def satochip_disable_2fa():
     """Disables 2fa on the Satochip."""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
 
         msg = {'action': "reset_2FA"}
         msg = json.dumps(msg)
@@ -492,7 +539,8 @@ def satochip_disable_2fa():
 def common_verify_PIN():
     """Verify that the pin supplied by --pin matches the current device pin"""
     try:
-        (response, sw1, sw2) = cc.card_verify_PIN()
+        pin = getpass("Enter your PIN:")
+        (response, sw1, sw2) = cc.card_verify_PIN(pin)
         if sw1 != 0x90 or sw2 != 0x00:
             print("ERROR: Incorrect Pin Supplied")
         else:
@@ -502,11 +550,19 @@ def common_verify_PIN():
         print(e)
 
 @main.command()
-@click.option("--new-pin", required=True, help="Device PIN (required for some operations)")
-def common_change_PIN(new_pin):
+def common_change_PIN():
     """Change the card PIN"""
+
+    pin = getpass("Enter your current PIN:")
+    new_pin = getpass("Enter your new PIN:")
+    new_pin2 = getpass("Confirm your new PIN:")
+    if new_pin != new_pin2:
+        print("ERROR! The two new PINs provided do not match!")
+        exit()
+
+    pin = list(pin.encode('utf8'))
     new_pin = list(new_pin.encode('utf8'))
-    response, sw1, sw2 = cc.card_change_PIN(0, cc.pin, new_pin)
+    response, sw1, sw2 = cc.card_change_PIN(0, pin, new_pin)
     if sw1 == 0x90 and sw2 == 0x00:
         print("Success: Pin Changed")
     if sw1 == 0x63:
@@ -522,8 +578,8 @@ def satochip_reset_factory():
         if click.confirm("Are you sure that you want to perform a factory reset?", default=False):
             (response, sw1, sw2) = cc.card_transmit(apdu)
             if sw1 == 0x9c and sw2 == 0x04:
-                print("Factory Reset Failed")
-                print("In addition to the factory-reset command, you also need to add the '--enablefactoryreset' argument to enable it")
+                print("Factory Reset Failed (setup not done)")
+                #print("In addition to the factory-reset command, you also need to add the '--enablefactoryreset' argument to enable it")
                 break
             if sw1 == 0x00 and sw2 == 0x00:
                 print("Card Connection Failed!")
@@ -561,6 +617,8 @@ def seedkeeper_generate_masterseed(label, export_rights, size):
     export_rights = export_rights.replace("_", " ")
     export_rights = dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
 
+    pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
     (response, sw1, sw2, sid, fingerprint) = cc.seedkeeper_generate_masterseed(size, export_rights, label)
 
     print("Imported - SID:", sid, " Fingerprint:", fingerprint)
@@ -577,6 +635,8 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
     export_rights = export_rights.replace("_", " ")
     export_rights = dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
 
+    pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
     (response, sw1, sw2, sid, fingerprint) = cc.seedkeeper_generate_2FA_secret(export_rights, label)
 
     print("Imported - SID:", sid, " Fingerprint:", fingerprint)
@@ -585,72 +645,85 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
 @click.option("--type", required=True, help="Plaintext file with secret to import (Raw secret-dict)")
 @click.option("--label", required=True, help="Label for the secret")
 @click.option("--export-rights", required=True, help="Export Rights for the secret")
-@click.option("--secret", required=True, help="The Secret itself")
-@click.option("--bip39-passphrase", default="", help="(Optional) Additional BIP39 Passphrase to store for mnemonics (Also Known as Extra Words in Electrum)")
-@click.option("--json-file", help="A JSON file containing an encrypted secret")
-@click.option("--pubkey-id", type=int, default=None, help="Public Key ID used to decrypt the an encrypted secret Note: Must be the ID of a 'secret' of the type 'Public Key', visible when using the command 'seedkeeper-list-secret-headers'")
-def seedkeeper_import_secret(type, label, export_rights, secret, bip39_passphrase, json_file, pubkey_id):
+@click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
+def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
     """Import a Secret into the Seedkeeper"""
-    if json_file is None:
-        # Check if secret type and export rights are valid options
-        if type not in list_hypenated_values(SEEDKEEPER_DIC_TYPE):
-            print("INVALID SECRET TYPE, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_TYPE))
-            exit()
 
-        if export_rights not in list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
-            print("INVALID EXPORT RIGHTS, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
-            exit()
+    pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
+    #todo: check pin 
 
-        # Swap underscores for spaces... Simplest solution to keep click happy and still use types directly from the dictionaries
-        export_rights = export_rights.replace("_", " ")
-        type = type.replace("_", " ")
-        header = cc.make_header(type, export_rights, label)
+    # Check if secret type and export rights are valid options
+    if type not in list_hypenated_values(SEEDKEEPER_DIC_TYPE):
+        print("INVALID SECRET TYPE, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_TYPE))
+        exit()
 
-        if type in ['Password','BIP39 mnemonic', 'Electrum mnemonic']:
-            if len(bip39_passphrase) > 0:
-                secret_list = list(bytes(secret + " Passphrase:" + bip39_passphrase, 'utf-8'))
-            else:
-                secret_list = list(bytes(secret, 'utf-8'))
+    if export_rights not in list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
+        print("INVALID EXPORT RIGHTS, must be one of:",list_hypenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
+        exit()
+
+    # Swap underscores for spaces... Simplest solution to keep click happy and still use types directly from the dictionaries
+    export_rights = export_rights.replace("_", " ")
+    type = type.replace("_", " ")
+    header = cc.make_header(type, export_rights, label)
+
+    # get secret and optionnaly passphrase
+    secret = input("Enter your secret:") 
+    bip39_passphrase = "" # default
+    if use_passphrase:
+        bip39_passphrase = input("Enter your BIP39 passphrase:") 
+
+    if type in ['Password','BIP39 mnemonic', 'Electrum mnemonic']:
+        if len(bip39_passphrase) > 0:
+            secret_list = list(bytes(secret + " Passphrase:" + bip39_passphrase, 'utf-8'))
         else:
-            secret_list = list(bytes.fromhex(secret))
+            secret_list = list(bytes(secret, 'utf-8'))
+    else:
+        secret_list = list(bytes.fromhex(secret))
 
-        if "mnemonic" in type:
-            print("Converting to Masterseed and storing in both formats... (To allow use directly in Satochip)")
-            try:
-                mnemonic_masterseed = mnemonic_to_masterseed(secret, bip39_passphrase, type)
-            except Exception as e:
-                exit(e)
+    if "mnemonic" in type:
+        print("Converting to Masterseed and storing in both formats... (To allow use directly in Satochip)")
+        try:
+            mnemonic_masterseed = mnemonic_to_masterseed(secret, bip39_passphrase, type)
+        except Exception as e:
+            exit(e)
 
-            masterseed_secret_list = list(mnemonic_masterseed)
-            masterseed_header = cc.make_header("Masterseed", export_rights, "Masterseed from mnemonic '" + label + "'")
+        masterseed_secret_list = list(mnemonic_masterseed)
+        masterseed_header = cc.make_header("Masterseed", export_rights, "Masterseed from mnemonic '" + label + "'")
 
-            masterseed_secret_list = [len(masterseed_secret_list)] + masterseed_secret_list
-            secret_dic = {'header': masterseed_header, 'secret_list': masterseed_secret_list}
-            (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
-            print("Imported - SID:", sid, " Fingerprint:", fingerprint)
-
-        secret_list = [len(secret_list)] + secret_list
-        secret_dic = {'header': header, 'secret_list': secret_list}
+        masterseed_secret_list = [len(masterseed_secret_list)] + masterseed_secret_list
+        secret_dic = {'header': masterseed_header, 'secret_list': masterseed_secret_list}
         (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
         print("Imported - SID:", sid, " Fingerprint:", fingerprint)
 
-    else:
-        f = open(secret_json_file)
+    secret_list = [len(secret_list)] + secret_list
+    secret_dic = {'header': header, 'secret_list': secret_list}
+    (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
+    print("Imported - SID:", sid, " Fingerprint:", fingerprint)
+
+@main.command()
+@click.option("--json-file", help="A JSON file containing an encrypted secret")
+@click.option("--pubkey-id", type=int, default=None, help="Public Key ID used to decrypt the encrypted secret Note: Must be the ID of a 'secret' of the type 'Public Key', visible when using the command 'seedkeeper-list-secret-headers'")
+def seedkeeper_import_secret_from_json(json_file, pubkey_id):
+    """Import a Secret into the Seedkeeper from a json file"""
+    try:
+        f = open(json_file)
         secret_json = json.load(f)
 
-        try:
-            if secret_json['authentikey_importer'] != cc.card_export_authentikey().get_public_key_hex(False):
-                print("IMPORT FAILED: Device Authentikey doesn't match the Trusted Pubkey required to import this file...")
-                print("Required Authentikey:", secret_json['authentikey_importer'])
-                print("Device Authentikey:  ", cc.card_export_authentikey().get_public_key_hex(False))
-                exit()
-            for secret_dic in secret_json['secrets']:
-                (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic, pubkey_id)
-                print("Imported - SID:", sid, " Fingerprint:", fingerprint)
-        except Exception as e:
-            print(e)
-            print("IMPORT FAILED: Incorrect pubkey selected for import, or import data is invalid/corrupt")
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
 
+        if secret_json['authentikey_importer'] != cc.card_export_authentikey().get_public_key_hex(False):
+            print("IMPORT FAILED: Device Authentikey doesn't match the Trusted Pubkey required to import this file...")
+            print("Required Authentikey:", secret_json['authentikey_importer'])
+            print("Device Authentikey:  ", cc.card_export_authentikey().get_public_key_hex(False))
+            exit()
+        for secret_dic in secret_json['secrets']:
+            (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic, pubkey_id)
+            print("Imported - SID:", sid, " Fingerprint:", fingerprint)
+    except Exception as e:
+        print(e)
+        print("IMPORT FAILED: Incorrect pubkey selected for import, or import data is invalid/corrupt")
 
 @main.command()
 @click.option("--sid", type=int, required=True, help="SecretID (As per the list-secret-headers command)")
@@ -659,6 +732,8 @@ def seedkeeper_import_secret(type, label, export_rights, secret, bip39_passphras
 def seedkeeper_export_secret(sid, pubkey_id, export_dict):
     """Export a Secret from the Seedkeeper"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         secret_dict = cc.seedkeeper_export_secret(sid, pubkey_id)
         if export_dict:
             print(secret_dict)
@@ -716,6 +791,8 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
 def seedkeeper_list_secret_headers():
     """Display a summary of the secrets stored on the SeedKeeper"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         headers = cc.seedkeeper_list_secret_headers()
 
         #Present the data in a human readable way (Copied from seedkeeper-tool)
@@ -749,6 +826,8 @@ def seedkeeper_list_secret_headers():
 def seedkeeper_print_logs():
     """Prints Log of operations on device"""
     try:
+        pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
         (logs, nbtotal_logs, nbavail_logs) = cc.seedkeeper_print_logs()
 
         logs = logs[0:nbtotal_logs]
@@ -788,8 +867,12 @@ def seedkeeper_print_logs():
 
 @main.command()
 def common_export_perso_pubkey():
-    """Exports the personalisation pubkey fromt he device"""
+    """Export the personalisation pubkey from the device"""
     try:
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
         print(binascii.hexlify(bytearray(cc.card_export_perso_pubkey())).decode())
     except Exception as e:
         print(e)
@@ -804,6 +887,8 @@ def common_import_perso_certificate(cert, cert_file):
                     cert = f.read()
         cert = cert.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "")
 
+    # TODO: can only import certificate before setup is done
+    # no user pin required
     cc.card_import_perso_certificate(cert)
 
 @main.command()
@@ -813,6 +898,10 @@ def common_export_perso_certificate():
         print("Unable to perform this function until setup is complete")
         return
     try:
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
         print(cc.card_export_perso_certificate())
     except Exception as e:
         print(e)
@@ -825,8 +914,14 @@ def common_verify_authenticity():
 
     """Verify the authenticy of the currently connected card"""
     try:
-        is_valid_serial_number, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
-        print("Cert & Device Serial Numbers Match:", is_valid_serial_number)
+
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+
+        is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
+        print("Card is authentic:", is_authentic)
         print("CA Cert:", txt_ca)
         print("SubCA Cert:", txt_subca)
         print("Device Cert:", txt_device)
@@ -984,7 +1079,7 @@ def satodime_key_reset(slot, unlock_secret, unlock_counter):
     cc.satodime_set_unlock_secret(unlock_secret)
 
     print()
-    if click.confirm("WARNING: This will reset slot " + str(slot) + ", wiping it's Private Key. Any funds at the corresponding address will be unrecoverablly lost unless you have another backup of this private key...\nAre you sure you want to reset this keyslot?", default=False):
+    if click.confirm("WARNING: This will reset slot " + str(slot) + ", wiping its Private Key. Any funds at the corresponding address will be unrecoverablly lost unless you have another backup of this private key...\nAre you sure you want to reset this keyslot?", default=False):
         try:
             response, sw1, sw2 = cc.satodime_reset_key(slot)
             print("Success, key reset...")
@@ -995,15 +1090,15 @@ def satodime_key_reset(slot, unlock_secret, unlock_counter):
         print("Updated Unlock Counter:", bytes(cc.unlock_counter).hex())
 
 @main.command()
-@click.option("--secret_json_file", required=True, help="File containing the encrypted secret")
-@click.option("--privkey", required=True, help="Privkey used to decrypt secret")
-def util_decrypt_secret_export(secret_json_file, privkey):
+@click.option("--json-file", required=True, help="File containing the encrypted secret")
+def util_decrypt_secret_export(json_file):
     """Tool to Decrypt Encrypted Seedkeeper Exports"""
-    # Opening JSON and loading file
-    f = open(secret_json_file)
-    export_data = json.load(f)
-
     try:
+        # Opening JSON and loading file
+        f = open(json_file)
+        export_data = json.load(f)
+
+        privkey = input("Enter your private key:")
         secrets = Decrypt_Secret(privkey, export_data)
         for secret in secrets:
             print(secret)
