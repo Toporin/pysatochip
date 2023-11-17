@@ -34,7 +34,9 @@ SATODIME_PROTOCOL_VERSION= (SATODIME_PROTOCOL_MAJOR_VERSION<<8)+SATODIME_PROTOCO
 # v0.12.2: add list of 2FA servers to select
 # v0.12.3: patch: downgrade pyscard version in requirements to solve conflicts
 # v0.14.1: add Satodime support
+# v0.14.2: minor improvements & corrections to support Satochip & Satodime
+# v0.14.3: add CLI & bugfix 
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 14
-PYSATOCHIP_REVISION= 2
+PYSATOCHIP_REVISION= 3
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
