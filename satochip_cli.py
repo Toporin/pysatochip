@@ -668,16 +668,23 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
     header = cc.make_header(type, export_rights, label)
 
     # get secret and optionnaly passphrase
-    secret = input("Enter your secret:") 
+    secret = input("Enter your secret:")
     bip39_passphrase = "" # default
     if use_passphrase:
-        bip39_passphrase = input("Enter your BIP39 passphrase:") 
+        bip39_passphrase = input("Enter your BIP39 passphrase:")
 
     if type in ['Password','BIP39 mnemonic', 'Electrum mnemonic']:
-        if len(bip39_passphrase) > 0:
-            secret_list = list(bytes(secret + " Passphrase:" + bip39_passphrase, 'utf-8'))
-        else:
-            secret_list = list(bytes(secret, 'utf-8'))
+        bip39_mnemonic_list = list(bytes(secret, 'utf-8'))
+        bip39_passphrase_list = list(bytes(bip39_passphrase, 'utf-8'))
+
+        print([len(bip39_mnemonic_list)])
+        print(bip39_mnemonic_list)
+        print([len(bip39_passphrase_list)])
+        print(bip39_passphrase_list)
+
+        secret_list = [len(bip39_mnemonic_list)] + bip39_mnemonic_list + [
+            len(bip39_passphrase_list)] + bip39_passphrase_list
+
     else:
         secret_list = list(bytes.fromhex(secret))
 
@@ -696,7 +703,6 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
         (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
         print("Imported - SID:", sid, " Fingerprint:", fingerprint)
 
-    secret_list = [len(secret_list)] + secret_list
     secret_dic = {'header': header, 'secret_list': secret_list}
     (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
     print("Imported - SID:", sid, " Fingerprint:", fingerprint)
@@ -753,11 +759,20 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
 
             if pubkey_id is None: #If we are exporting in the clear
                 if 'mnemonic' in stype:
-                    secret_dict['secret'] = binascii.unhexlify(secret_dict['secret'])[1:].decode()
+                    secret_dict['secret'] = binascii.unhexlify(secret_dict['secret'])[1:].decode().rstrip("\x00")
+
+                    bip39_secret = secret_dict['secret']
+
+                    secret_size = secret_dict['secret_list'][0]
+                    secret_mnemonic = bip39_secret[:secret_size]
+                    secret_passphrase = bip39_secret[secret_size + 1:]
+
+                    secret_dict['secret'] = "\nMnemonic:\"" + secret_mnemonic + "\"\nPassphrase:\"" + secret_passphrase + "\""
+
                 elif stype == 'Password':
-                    secret_dict['secret'] = binascii.unhexlify(secret_dict['secret']).decode()
+                    secret_dict['secret'] = "\"" + binascii.unhexlify(secret_dict['secret'])[1:].decode() + "\""
                 else:
-                    secret_dict['secret'] = secret_dict['secret'][2:]
+                    secret_dict['secret'] = "\"" + secret_dict['secret'][2:] + "\""
 
                 print("Secret (Cleartext):", secret_dict['secret'])
 
