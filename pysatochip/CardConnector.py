@@ -12,7 +12,7 @@ from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel
 from .util import msg_magic, sha256d, hash_160, EncodeBase58Check, dict_swap_keys_values
-from .certificate_validator import CertificateValidator
+#from .certificate_validator import CertificateValidator
 
 import hashlib
 import hmac
