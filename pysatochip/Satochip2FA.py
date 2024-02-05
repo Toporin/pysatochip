@@ -36,7 +36,7 @@ import ssl
 from xmlrpc.client import ServerProxy
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.DEBUG)
 
 # User can select his 2FA server from a list
 # User should select the same server on the 2FA app
@@ -54,7 +54,7 @@ ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile
 #server = ServerProxy('https://cosigner.satochip.io:81', allow_none=True, context=ssl_context) # wrong port to generate timeout error
 
 class Satochip2FA:
-    def __init__(self, loglevel= logging.INFO):
+    def __init__(self, loglevel= logging.WARNING):
         logger.setLevel(loglevel)
     
     # send the challenge and get the reply 

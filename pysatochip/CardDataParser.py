@@ -27,6 +27,7 @@ from ecdsa.util import sigdecode_der
 
 from .ecc import ECPubkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 from .JCconstants import *
+from .slip44 import *
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -577,8 +578,8 @@ class CardDataParser:
         #unlock_code_hex= bytes(unlock_code).hex()
         key_status_txt=  DIC_STATE.get(key_status, f"Unknown code {key_status}")
         key_asset_txt= DIC_ASSET_BY_CODE.get(key_asset, f"Unknown code {key_asset}")
-        key_slip44_hex= bytes(key_slip44).hex() # todo!
-        
+        key_slip44_hex= bytes(key_slip44).hex()
+        key_slip44_txt = DICT_SLIP44_BY_CODE.get(int.from_bytes( key_slip44, "big"), f"Unknown code {key_slip44}")
         size_contract= key_contract[1]
         key_contract_hex= "0x"+ bytes(key_contract[2:(2+size_contract)]).hex() # parse as tlv
         #key_contract_hex= bytes(key_contract).hex() # todo: parse as tlv
@@ -603,7 +604,7 @@ class CardDataParser:
                                 'key_asset':key_asset, 'key_slip44':key_slip44, 'key_contract':key_contract, 
                                 'key_tokenid':key_tokenid, 'key_data':key_data,
                                 'key_status_txt':key_status_txt, 
-                                'key_asset_txt':key_asset_txt, 'key_slip44_hex':key_slip44_hex,
+                                'key_asset_txt':key_asset_txt, 'key_slip44_hex':key_slip44_hex, 'key_slip44_txt':key_slip44_txt,
                                 'key_contract_hex':key_contract_hex, 'key_tokenid_hex':key_tokenid_hex, 'key_tokenid_int':key_tokenid_int,
                                 'key_data_txt':key_data_txt, 'is_token':is_token, 'is_nft':is_nft}
         
@@ -638,7 +639,7 @@ class CardDataParser:
         sig_list= response[offset:(offset+sig_size)]
         offset+=sig_size
         remain-=sig_size
-        
+
         # check signature
         pubkey_hex= bytes(pubkey_list).hex()
         logger.debug(f"Verifying sig for pubkey {pubkey_hex} using authentikey {self.authentikey.get_public_key_bytes(compressed=False).hex()}")

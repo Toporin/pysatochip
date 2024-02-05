@@ -5,3 +5,6 @@ dist/
 build/
 *.egg-info
 *.pyc
+.idea/
+.vs/
+pysatochip/satochip_cli.py
