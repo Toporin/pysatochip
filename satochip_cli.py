@@ -17,7 +17,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import click, logging, time, binascii, json, hashlib, base64, sys
-from os import urandom
+from os import urandom, environ
 from getpass import getpass
 
 from ecdsa import SigningKey, SECP256k1, ECDH
@@ -602,6 +602,9 @@ def satochip_reset_factory():
                 print("The factory reset failed")
                 print("Instruction not supported - error code: " + str(hex(256 * sw1 + sw2)))
                 break
+            else:
+                print("The factory reset has been cancelled")
+                break
     return
 
 @main.command()
@@ -806,7 +809,13 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
 def seedkeeper_list_secret_headers():
     """Display a summary of the secrets stored on the SeedKeeper"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        
         cc.card_verify_PIN(pin)
         headers = cc.seedkeeper_list_secret_headers()
 
@@ -838,10 +847,42 @@ def seedkeeper_list_secret_headers():
         print(e)
 
 @main.command()
+@click.option("--sid", type=int, required=True, help="SecretID (As per the list-secret-headers command)")
+def seedkeeper_reset_secret(sid):
+    """Reset a secret object in memory. 
+        WARNING: this action cannot be undone!"""
+    try:
+        logger.info("In seedkeeper_reset_secret")
+        print("WARNING: RESETTING A SECRET WITHOUT A WORKING BACKUP CAN LEAD TO UNRECOVERABLE LOSS OF FUNDS!")
+        
+        if click.confirm("Are you sure that you want to reset a secret?", default=False):
+            
+            pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+        
+            is_reset = cc.seedkeeper_reset_secret(sid)
+            if is_reset:
+                print("Secret reset successfully!")
+            else:
+                print("Failed to reset secret (secret not found?).")
+        else:
+            print("Secret reset cancelled!")
+
+    except Exception as e:
+        print(e)  
+
+
+@main.command()
 def seedkeeper_print_logs():
     """Prints Log of operations on device"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+
         cc.card_verify_PIN(pin)
         (logs, nbtotal_logs, nbavail_logs) = cc.seedkeeper_print_logs()
 
@@ -886,7 +927,12 @@ def common_export_perso_pubkey():
     try:
         # PIN required except for satodime
         if cc.card_type != "Satodime":
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         print(binascii.hexlify(bytearray(cc.card_export_perso_pubkey())).decode())
     except Exception as e:

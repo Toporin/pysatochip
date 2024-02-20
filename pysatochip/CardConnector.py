@@ -1665,11 +1665,11 @@ class CardConnector:
         return id, fingerprint_from_seedkeeper
         
     def seedkeeper_export_secret(self, sid, sid_pubkey= None):
+        logger.debug("In seedkeeper_export_secret")
+
         # Initialise self.parser.authentikey if not done already (If it is none, this function will crash)
         if self.parser.authentikey is None:
             self.card_bip32_get_authentikey()
-
-        logger.debug("In seedkeeper_export_secret")
         
         is_secure_export= False if (sid_pubkey is None) else True
         
@@ -1796,6 +1796,30 @@ class CardConnector:
             raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
             
         return headers
+
+    def seedkeeper_reset_secret(self, sid):
+        logger.debug("In seedkeeper_reset_secret")
+
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA5
+        p1= 0x00
+        p2= 0x00
+        
+        data= [(sid>>8)%256, sid%256]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # send call
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            return True
+        elif (sw1==0x9C and sw2==0x08):
+            # logger.debug(f"Error 0x9C08: Secret not found!")
+            # raise SeedKeeperError("Reset secret failed: secret not found?")
+            return False
+        else:
+            logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
 
     def seedkeeper_print_logs(self, print_all=True):
         logger.debug("In seedkeeper_print_logs")
