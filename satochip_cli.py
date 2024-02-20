@@ -199,7 +199,12 @@ def common_get_card_label():
     """Retrieves the plain text label for the card"""
     try:
         if cc.card_type != "Satodime":
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         (response, sw1, sw2, label) = cc.card_get_label()
         print("Device Label:", label)
@@ -213,7 +218,12 @@ def common_set_card_label(label):
     try:
         if cc.card_type != "Satodime":
             # TODO: for satodime, may fail if performed via NFC (needs ownership)
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         (response, sw1, sw2) = cc.card_set_label(label)
         if sw1 != 0x90 or sw2 != 0x00:
@@ -296,7 +306,12 @@ def satochip_import_new_mnemonic(use_passphrase):
                 "WARNING: These seed words are your wallet, back them up in a secure, offline place and don't share them with anyone.  \nConfirm when you have written them down",
                 default=False):
             try:
-                pin = getpass("Enter your PIN:")
+                # get PIN from environment variable or interactively
+                if 'PYSATOCHIP_PIN' in environ:
+                    pin= environ.get('PYSATOCHIP_PIN')
+                    print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+                else:
+                    pin = getpass("Enter your PIN:")
                 cc.card_verify_PIN(pin)
                 cc.card_bip32_import_seed(seed)
                 print("Seed Successfully Imported")
@@ -307,8 +322,14 @@ def satochip_import_new_mnemonic(use_passphrase):
 def satochip_import_unencrypted_masterseed():
     """Imports a BIP39 Seed (In Hexidecimal Format) to the SatoChip Device"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
+
         seed = input("Enter your BIP39 Seed hex (Masterseed):") 
         cc.card_bip32_import_seed(seed)
         print("Seed Successfully Imported")
@@ -321,7 +342,12 @@ def satochip_import_unencrypted_masterseed():
 def satochip_import_unencrypted_mnemonic(use_passphrase, electrum):
     """Imports a mnemonic Seed (In Electrum or BIP39 Format) to the SatoChip Device"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
         mnemonic_type = "BIP39"
@@ -344,7 +370,12 @@ def satochip_import_encrypted_masterseed(json_file):
         f = open(json_file)
         secret_json = json.load(f)
 
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         cc.card_import_encrypted_secret(secret_json['secrets'][0])
         print("Success: Masterseed Imported")
@@ -360,7 +391,12 @@ def satochip_import_encrypted_2fa_key(json_file):
             f = open(json_file)
             secret_json = json.load(f)
 
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
             cc.card_import_encrypted_secret(secret_json['secrets'][0])
             print("Success: 2FA Key Imported and Enabled")
@@ -372,7 +408,12 @@ def satochip_import_encrypted_2fa_key(json_file):
 def satochip_import_trusted_pubkey(pubkey):
     """Imports a trusted pubkey"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         cc.card_import_trusted_pubkey(pubkey)
     except Exception as e:
@@ -382,7 +423,12 @@ def satochip_import_trusted_pubkey(pubkey):
 def satochip_export_trusted_pubkey():
     """Exports the current trusted pubkey"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         print(cc.card_export_trusted_pubkey())
     except Exception as e:
@@ -392,7 +438,12 @@ def satochip_export_trusted_pubkey():
 def common_export_authentikey():
     """Exports the device Authentikey"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         print(cc.card_export_authentikey().get_public_key_hex(False))
     except Exception as e:
@@ -403,7 +454,8 @@ def satochip_reset_seed():
     """Wipes the seed that is currently on the device."""
     if click.confirm("Are you sure that you want to wipe the device seed? (This will cause an UNRECOVERABLE LOSS OF FUNDS if you don't have a working backup", default=False):
         try:
-            pin = getpass("Enter your PIN:")
+            # we don't try to recover PIN from environment variables for destructive operations
+            pin = getpass("Enter your PIN:") 
             cc.card_verify_PIN(pin)
             if cc.needs_2FA:
                 cc.card_bip32_get_authentikey()
@@ -431,7 +483,12 @@ def satochip_reset_seed():
 def satochip_bip32_get_authentikey():
     """Export the BIP32 Authentikey"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         print(cc.card_bip32_get_authentikey().get_public_key_hex(False))
     except Exception as e:
@@ -442,7 +499,12 @@ def satochip_bip32_get_authentikey():
 def satochip_bip32_get_extendedkey(path):
     """Get extended pubkey and chaincode for a given derivation path (m/44'/0'/0'/0 by default)"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         (key, chaincode) = cc.card_bip32_get_extendedkey(path)
         print("Key: ", key.get_public_key_hex(True))
@@ -457,7 +519,12 @@ def satochip_bip32_get_extendedkey(path):
 def satochip_bip32_get_xpub(path, xtype, is_mainnet):
     """Get extended public key (xpub) for a given derivation path (m/44'/0'/0'/0 by default) and script type (p2pkh by default)"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         print(cc.card_bip32_get_xpub(path, xtype, is_mainnet))
     except Exception as e:
@@ -471,7 +538,12 @@ def satochip_sign_message(path, message):
     message_byte = message.encode('utf8')
 
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         # check if 2FA is required
         hmac=b''
@@ -503,6 +575,7 @@ def satochip_import_unencrypted_2fa_key():
     """Imports an encrypted seed backup. (The type typically exported from a SeedKeeper device)"""
     try:
         if click.confirm("WARNING: This will import AND enable 2FA on your Satochip device using the key provided. \nAre you sure that you want to do this?", default=False):
+            # we don't try to recover PIN from evironment variables for particularly sensitive operations
             pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
             
@@ -516,7 +589,12 @@ def satochip_import_unencrypted_2fa_key():
 def satochip_disable_2fa():
     """Disables 2fa on the Satochip."""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
         msg = {'action': "reset_2FA"}
@@ -620,7 +698,12 @@ def seedkeeper_generate_masterseed(label, export_rights, size):
     export_rights = export_rights.replace("_", " ")
     export_rights = dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
 
-    pin = getpass("Enter your PIN:")
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
     cc.card_verify_PIN(pin)
     (response, sw1, sw2, sid, fingerprint) = cc.seedkeeper_generate_masterseed(size, export_rights, label)
 
@@ -638,7 +721,12 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
     export_rights = export_rights.replace("_", " ")
     export_rights = dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
 
-    pin = getpass("Enter your PIN:")
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
     cc.card_verify_PIN(pin)
     (response, sw1, sw2, sid, fingerprint) = cc.seedkeeper_generate_2FA_secret(export_rights, label)
 
@@ -652,7 +740,12 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
 def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
     """Import a Secret into the Seedkeeper"""
 
-    pin = getpass("Enter your PIN:")
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
     cc.card_verify_PIN(pin)
     #todo: check pin 
 
@@ -719,7 +812,12 @@ def seedkeeper_import_secret_from_json(json_file, pubkey_id):
         f = open(json_file)
         secret_json = json.load(f)
 
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
         if secret_json['authentikey_importer'] != cc.card_export_authentikey().get_public_key_hex(False):
@@ -741,7 +839,12 @@ def seedkeeper_import_secret_from_json(json_file, pubkey_id):
 def seedkeeper_export_secret(sid, pubkey_id, export_dict):
     """Export a Secret from the Seedkeeper"""
     try:
-        pin = getpass("Enter your PIN:")
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         secret_dict = cc.seedkeeper_export_secret(sid, pubkey_id)
         if export_dict:
@@ -856,7 +959,7 @@ def seedkeeper_reset_secret(sid):
         print("WARNING: RESETTING A SECRET WITHOUT A WORKING BACKUP CAN LEAD TO UNRECOVERABLE LOSS OF FUNDS!")
         
         if click.confirm("Are you sure that you want to reset a secret?", default=False):
-            
+            # we don't try to recover PIN from environment variables for particularly sensitive operations
             pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         
@@ -961,7 +1064,12 @@ def common_export_perso_certificate():
     try:
         # PIN required except for satodime
         if cc.card_type != "Satodime":
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         print(cc.card_export_perso_certificate())
     except Exception as e:
@@ -978,7 +1086,12 @@ def common_verify_authenticity():
 
         # PIN required except for satodime
         if cc.card_type != "Satodime":
-            pin = getpass("Enter your PIN:")
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
 
         is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
