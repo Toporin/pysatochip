@@ -1293,6 +1293,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         return (response, sw1, sw2)
 
+    # todo: simplify code
     def card_verify_PIN(self, pin = None):
         logger.debug("In card_verify_PIN")
         
@@ -1331,6 +1332,8 @@ class CardConnector:
                 msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
                 if self.client is not None:
                     self.client.request('show_error', msg)
+                else:
+                    raise WrongPinError(msg, sw1, sw2, ins, response)
             # wrong PIN (legacy before v0.11)    
             elif sw1==0x9c and sw2==0x02:
                 pin = None # reset provided pin
@@ -1340,12 +1343,14 @@ class CardConnector:
                 msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
                 if self.client is not None:
                     self.client.request('show_error', msg)
+                else:
+                    raise WrongPinError(msg, sw1, sw2, ins, response)
             # blocked PIN
             elif sw1==0x9c and sw2==0x0c:
                 msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
                 if self.client is not None:
                     self.client.request('show_error', msg)
-                raise RuntimeError(msg)
+                raise IdentityBlockedError(msg) #RuntimeError(msg)
             # any other edge case
             else:
                 self.set_pin(0, None) #reset cached PIN value
@@ -1436,8 +1441,14 @@ class CardConnector:
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             if self.client is not None:
                 self.client.request('show_error', msg)
-            raise RuntimeError(msg)
-        
+            raise IdentityBlockedError(msg) #raise RuntimeError(msg)
+        # reset to factory (SeedKeeper v0.2)
+        elif sw1==0xFF and sw2==0x00: 
+            self.set_pin(pin_nbr, None) #reset cached PIN value
+            msg = ("CARD RESET TO FACTORY!")
+            if self.client is not None:
+                self.client.request('show_error', msg)
+
         return (response, sw1, sw2)
 
     def card_logout_all(self):
@@ -2391,7 +2402,7 @@ class CardConnector:
 
 
     #################################
-    #                      ERRORS                  #        
+    #              ERRORS           #        
     ################################# 
     
 class ApduError(Exception):
@@ -2408,6 +2419,10 @@ class CardSelectError(ApduError):
         super().__init__(message, 0x6A, 0x82, ins, response)
 
 # Generic 
+class WrongPinError(ApduError):
+    def __init__(self, message, sw1, sw2, ins, response=[]):            
+        super().__init__(message, sw1, sw2, ins, response)
+
 class CardSetupNotDoneError(ApduError):
     def __init__(self, message, ins=0x00, response=[]):            
         super().__init__(message, 0x9c, 0x04, ins, response)
@@ -2440,6 +2455,10 @@ class IncorrectUnlockCounterError(ApduError):
 # legacy
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""
+    pass
+
+class IdentityBlockedError(Exception):
+    """Raised when a PIN or PUK is blocked after to many wrong atempts"""
     pass
 
 class UninitializedSeedError(Exception):

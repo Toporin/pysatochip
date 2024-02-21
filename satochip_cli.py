@@ -23,7 +23,9 @@ from getpass import getpass
 from ecdsa import SigningKey, SECP256k1, ECDH
 from mnemonic import Mnemonic
 
-from pysatochip.CardConnector import CardConnector, UninitializedSeedError, SeedKeeperError, IncorrectUnlockCodeError, IncorrectP1Error, IncorrectUnlockCounterError, IncorrectKeyslotStateError, IncorrectProtocolMediaError
+from pysatochip.CardConnector import (CardConnector, UninitializedSeedError, SeedKeeperError, 
+    IncorrectUnlockCodeError, IncorrectP1Error, IncorrectUnlockCounterError, IncorrectKeyslotStateError, 
+    IncorrectProtocolMediaError, IdentityBlockedError, WrongPinError)
 from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
@@ -647,10 +649,60 @@ def common_change_PIN():
         print("Failed: Incorrect PIN")
 
 @main.command()
-def satochip_reset_factory():
-    """Initiate the Satochip Factory Reset Process"""
+def common_reset_factory():
+    """Initiate the card Factory Reset Process using the legacy or new approach based on card type and version
+
+    factory reset support:
+    SeedKeeper: all versions support factory reset
+    Satodime: no factory reset support (simply reset all vaults on the card)
+    Satochip: factory reset introduced in v0.12-0.4
+    
+    new version currently only implemented on SeedKeeper v0.2 and higher
+    """
+
+    if cc.card_type == "SeedKeeper":
+        # get version
+        (response, sw1, sw2, d) = cc.card_get_status()
+        version = d["protocol_version"]
+        if (version >= 2):
+            print("This SeedKeeper supports factory reset (new version)!")
+            common_reset_factory_new()
+        else: 
+            print("This SeedKeeper supports factory reset (legacy)!")
+            common_reset_factory_legacy()
+    
+    elif cc.card_type == "Satodime":
+        print("Satodime does not support factory reset!")
+        return
+
+    elif cc.card_type == "Satochip":
+        # get version
+        (response, sw1, sw2, d) = cc.card_get_status()
+        version = ((d["protocol_major_version"]<<24)
+                    + (d["protocol_minor_version"]<<16)
+                    + (d["applet_major_version"]<<8)
+                    + (d["applet_minor_version"]))
+        version_min = (12<<16)+4 # v0.12-0.4
+        if (version >= version_min):
+            print("This Satochip supports factory reset (legacy)!")
+            common_reset_factory_legacy() 
+        else:
+            print("Satochip below version v0.12-0.4 do not support factory reset!")
+            return
+
+    else:
+        print(f"Unsupported card type: {cc.card_type}")
+        return
+
+    return
+
+
+def common_reset_factory_legacy():
+    """Initiate the Factory Reset Process
+    Legacy approach based on sending a specifi APDU a certain number of time
+    """    
     print("WARNING: FACTORY RESET WITHOUT A WORKING BACKUP WILL LEAD TO UNRECOVERABLE LOSS OF FUNDS")
-    logger.info("In card_reset_factory")
+    logger.info("In common_reset_factory_legacy")
     apdu = [0xB0, 0xFF, 0x00, 0x00, 0x00]  # Reset APDU
     while(True):
         if click.confirm("Are you sure that you want to perform a factory reset?", default=False):
@@ -684,6 +736,96 @@ def satochip_reset_factory():
                 print("The factory reset has been cancelled")
                 break
     return
+
+
+def common_reset_factory_new():
+    """Initiate the Factory Reset Process
+    New approach where reset to factory is trigerred when PIN and PUK is blocked (the card is basically unusable in this state)
+    """ 
+    print("WARNING: FACTORY RESET WITHOUT A WORKING BACKUP WILL LEAD TO UNRECOVERABLE LOSS OF FUNDS")
+    logger.info("In common_reset_factory_new")
+
+    pinRemaining = -1
+    doReset = click.confirm("Are you sure that you want to perform a factory reset?", default=False)
+    # Block PIN
+    while(doReset):
+        
+        pin = getpass("Enter a wrong PIN to block the card, or the correct PIN to abort:")
+        if len(pin)<4:
+            print("PIN code too short, factory reset is aborted")
+            doReset = False
+            break
+
+        try:
+            (response, sw1, sw2)= cc.card_verify_PIN(pin)
+            if sw1 == 0x90 and sw2 == 0x00:
+                print("You have entered a correct PIN, factory reset is aborted")
+                doReset = False
+                pinRemaining = -1
+                break
+        except IdentityBlockedError as ex:
+            # PIN blocked, PUK next
+            #print(ex)
+            print("PIN code is blocked!")
+            pinRemaining = 0
+            break
+        except WrongPinError as ex:
+            print(ex)
+            pinRemaining = (ex.sw2 & ~0xc0)
+            print(f"pinRemaining: {pinRemaining}")
+        except Exception as ex:
+            print(ex)
+
+    # Block PUK
+    pukRemaining = -1
+    while(doReset):
+        
+        puk = getpass("Enter a wrong PUK to block the card, or the right PUK to abort:")
+        puk_list = list(puk.encode('utf-8'))
+        if len(puk_list)<4:
+            print("PUK code too short, factory reset is aborted")
+            doReset = False
+            break
+
+        try:
+            (response, sw1, sw2)= cc.card_unblock_PIN(0, puk_list)
+            if sw1 == 0x90 and sw2 == 0x00:
+                print("You have entered a correct PUK, factory reset is aborted, PIN is unblocked")
+                doReset = False
+                pinRemaining = -1
+                pukRemaining = -1
+                break
+            elif sw1==0x63 and (sw2 & 0xc0)==0xc0:
+                #wrong puk
+                pukRemaining= (sw2 & ~0xc0)
+                msg = (f"Wrong PUK! {pukRemaining} tries remaining!")
+                print(msg)
+            elif sw1==0x9c and sw2==0x0c:
+                # should not happen actually, since reset to factory is triggered before
+                pukRemaining = 0
+                print(f"PUK blocked!")
+            elif sw1 == 0xFF and sw2 == 0x00:
+                # Card reset to factory
+                pinRemaining = -1
+                pukRemaining = -1
+                print(f"CARD RESET TO FACTORY!")
+                return
+            else:
+                print(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+
+        except Exception as ex:
+            print(ex)
+            
+
+    if doReset == False:
+        print("Reset factory aborted")
+        if pinRemaining != -1:
+            print(f"WARNING: remaining PIN tries: {pinRemaining}")
+        if pukRemaining != -1:
+            print(f"WARNING: remaining PIN tries: {pinRemaining}")
+
+    return
+
 
 @main.command()
 @click.option("--label", required=True, help="Label for the secret")
