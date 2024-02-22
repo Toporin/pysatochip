@@ -365,29 +365,40 @@ class CardConnector:
         (response, sw1, sw2)= self.card_transmit(apdu) # todo: try/except if setup not done
         d={}
         if (sw1==0x90) and (sw2==0x00):
+            # card applet version
             d["protocol_major_version"]= response[0]
             d["protocol_minor_version"]= response[1]
             d["applet_major_version"]= response[2]
             d["applet_minor_version"]= response[3]
             d["protocol_version"]= (d["protocol_major_version"]<<8)+d["protocol_minor_version"] 
+            # PIN/PUK status
             if len(response) >=8:
                 d["PIN0_remaining_tries"]= response[4]
                 d["PUK0_remaining_tries"]= response[5]
                 d["PIN1_remaining_tries"]= response[6]
                 d["PUK1_remaining_tries"]= response[7]
                 self.needs_2FA= d["needs2FA"]= False #default value
+            # 2FA status
             if len(response) >=9:
                 self.needs_2FA= d["needs2FA"]= False if response[8]==0X00 else True
+            # seed status (satochip)
             if len(response) >=10:
                 self.is_seeded= d["is_seeded"]= False if response[9]==0X00 else True
+            # setup status
             if len(response) >=11:
 	                self.setup_done= d["setup_done"]= False if response[10]==0X00 else True    
             else:
                 self.setup_done= d["setup_done"]= True    
+            # secure channel status
             if len(response) >=12:
                 self.needs_secure_channel= d["needs_secure_channel"]= False if response[11]==0X00 else True    
             else:
                 self.needs_secure_channel= d["needs_secure_channel"]= False
+            # NFC policy
+            if len(response) >=13:
+                self.nfc_policy= d["nfc_policy"]= response[12] # 0:NFC_ENABLED, 1:NFC_DISABLED, 2:NFC_BLOCKED
+            else:
+                self.nfc_policy= d["nfc_policy"]= 0x00 # NFC_ENABLED by default
         
         elif (sw1==0x9c) and (sw2==0x04):
             self.setup_done= d["setup_done"]= False  
@@ -444,6 +455,20 @@ class CardConnector:
         
         return (response, sw1, sw2)
     
+    def card_set_nfc_policy(self, policy_byte):
+        logger.debug("In card_set_nfc_policy")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3E
+        p1= policy_byte
+        p2= 0x00 #set
+        
+        data= []
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        return (response, sw1, sw2)
+
     def card_setup(self,
                     pin_tries0, ublk_tries0, pin0, ublk0,
                     pin_tries1, ublk_tries1, pin1, ublk1,
@@ -1919,7 +1944,7 @@ class CardConnector:
         return header_hex
     
     #################################
-    #                   PERSO PKI                 #        
+    #           PERSO PKI           #        
     #################################    
     def card_export_perso_pubkey(self):
         logger.debug("In card_export_perso_pubkey")

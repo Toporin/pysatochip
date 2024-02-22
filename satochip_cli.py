@@ -58,6 +58,23 @@ def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
 
     return mnemonic_masterseed
 
+
+def mnemonic_to_entropy(bip39_mnemonic, wordlist):
+    print(f"Worldlist: {wordlist}")
+
+    mnemonic_obj = Mnemonic(wordlist)
+    entropy = mnemonic_obj.to_entropy(bip39_mnemonic)
+
+    return entropy # bytearray
+
+def entropy_to_mnemonic(entropy_bytes, wordlist):
+    print(f"Worldlist: {wordlist}")
+
+    mnemonic_obj = Mnemonic(wordlist)
+    mnemonic = mnemonic_obj.to_mnemonic(entropy_bytes)
+
+    return mnemonic # str
+
 def do_challenge_response(msg):
     (id_2FA, msg_out) = cc.card_crypt_transaction_2FA(msg, True)
     d = {}
@@ -133,9 +150,9 @@ def main(verbose, devicefilter):
         time.sleep(1)  # give some time to initialize reader...
         try:
             status = cc.card_get_status()
-        except Exception:
+        except Exception as ex:
             logger.critical("Card Connect Failed")
-            exit()
+            exit(ex)
 
         if (cc.needs_secure_channel):
             cc.card_initiate_secure_channel()
@@ -232,6 +249,43 @@ def common_set_card_label(label):
             print("ERROR: Set Label Failed")
         else:
             print("Device Label Updated")
+    except Exception as e:
+        print(e)
+
+@main.command()
+@click.option("--nfc-policy", default=0, help="NFC Policy: 0 = NFC_ENABLED, 1 = NFC_DISABLED, 2 = NFC_BLOCKED")
+def common_set_nfc_policy(nfc_policy):
+    """Sets the NFC interface policy: enable/disable/block card communication through NFC.
+    The default policy is 'NFC_ENABLED'. The NFC policy can only be set via the contact (USB) interface. 
+    WARNING: if the policy is set to 2 (NFC_BLOCKED), it can only be reenabled through a factory reset!"""
+
+    try:
+        if (nfc_policy == 2):
+            if click.confirm("Are you sure that you want to block NFC interface? NFC can only be reenabled with factory reset!", default=False):
+                # we don't try to recover PIN from environment variables for destructive operations
+                pin = getpass("Enter your PIN:") 
+            else:
+                print("Blocking NFC interface cancelled!")
+                exit()
+        else: 
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+
+        cc.card_verify_PIN(pin)
+        (response, sw1, sw2) = cc.card_set_nfc_policy(nfc_policy)
+        if (sw1 == 0x90 and sw2 == 0x00):
+            print("NFC policy applied successfully!")
+        elif (sw1 == 0x9C and sw2 == 0x48):
+            print("Cannot set the NFC policy through the NFC interface, use contact interface instead")
+        elif (sw1 == 0x9C and sw2 == 0x49):
+            print("Cannot set the NFC policy: NFC interface is BLOCKED, a factory reset is required to reenable NFC!")
+        else:
+            print(f"Failed to set NFC policy with error code: {hex(sw1)}{hex(sw2)}")
+
     except Exception as e:
         print(e)
 
@@ -879,7 +933,8 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
 @click.option("--label", required=True, help="Label for the secret")
 @click.option("--export-rights", required=True, help="Export Rights for the secret")
 @click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
-def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
+@click.option("--wordlist", default="english", help="Define which worldlist (language) to use for BIP39 v2")
+def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlist):
     """Import a Secret into the Seedkeeper"""
 
     # get PIN from environment variable or interactively
@@ -923,10 +978,42 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
         secret_list = [len(bip39_mnemonic_list)] + bip39_mnemonic_list + [
             len(bip39_passphrase_list)] + bip39_passphrase_list
 
+    elif type == 'BIP39 mnemonic v2':
+        #todo check worldlist is supported
+        wordlist_byte = dict_swap_keys_values(BIP39_WORDLIST_DIC).get(wordlist)
+        if wordlist_byte == None:
+            print(f"Error: wordlist {wordlist} unsupported!")
+            exit()
+
+        try:
+            bip39_entropy_bytes = mnemonic_to_entropy(secret, wordlist)
+            bip39_entropy_list = list(bip39_entropy_bytes)
+        except Exception as ex:
+            exit(e)
+        bip39_passphrase_list = list(bytes(bip39_passphrase, 'utf-8'))
+        try:
+            masterseed_bytes= mnemonic_to_masterseed(secret, bip39_passphrase, 'BIP39 mnemonic')
+            masterseed_list = list(masterseed_bytes)
+        except Exception as e:
+            exit(e)
+
+        secret_list = ([wordlist_byte] + 
+                        [len(bip39_entropy_list)] + 
+                        bip39_entropy_list + 
+                        [len(bip39_passphrase_list)] + 
+                        bip39_passphrase_list +
+                        [len(masterseed_list)] + 
+                        masterseed_list
+                        )
     else:
         secret_list = list(bytes.fromhex(secret))
 
-    if "mnemonic" in type:
+    secret_dic = {'header': header, 'secret_list': secret_list}
+    (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
+    print("Imported - SID:", sid, " Fingerprint:", fingerprint)
+
+    # convert to masterseed in case of mnemonic
+    if type in ['BIP39 mnemonic', 'Electrum mnemonic']:
         print("Converting to Masterseed and storing in both formats... (To allow use directly in Satochip)")
         try:
             mnemonic_masterseed = mnemonic_to_masterseed(secret, bip39_passphrase, type)
@@ -941,9 +1028,6 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase):
         (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
         print("Imported - SID:", sid, " Fingerprint:", fingerprint)
 
-    secret_dic = {'header': header, 'secret_list': secret_list}
-    (sid, fingerprint) = cc.seedkeeper_import_secret(secret_dic)
-    print("Imported - SID:", sid, " Fingerprint:", fingerprint)
 
 @main.command()
 @click.option("--json-file", help="A JSON file containing an encrypted secret")
@@ -1006,23 +1090,101 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
             print("Number of Exports (Secure):", secret_dict['export_nbsecure'])
 
             if pubkey_id is None: #If we are exporting in the clear
-                if 'mnemonic' in stype:
-                    secret_dict['secret'] = binascii.unhexlify(secret_dict['secret'])[1:].decode().rstrip("\x00")
+                #if 'mnemonic' in stype:
+                if stype in ['BIP39 mnemonic', 'Electrum mnemonic']:
+                    # # todo: do not modify secret_dict['secret'] but use new variables?
+                    # secret_dict['secret'] = binascii.unhexlify(secret_dict['secret'])[1:].decode().rstrip("\x00")
 
-                    bip39_secret = secret_dict['secret']
+                    # bip39_secret = secret_dict['secret']
 
-                    secret_size = secret_dict['secret_list'][0]
-                    secret_mnemonic = bip39_secret[:secret_size]
-                    secret_passphrase = bip39_secret[secret_size + 1:]
+                    # secret_size = secret_dict['secret_list'][0]
+                    # secret_mnemonic = bip39_secret[:secret_size]
+                    # secret_passphrase = bip39_secret[secret_size + 1:]
 
-                    secret_dict['secret'] = "\nMnemonic:\"" + secret_mnemonic + "\"\nPassphrase:\"" + secret_passphrase + "\""
+                    # secret_string = "\nMnemonic:\"" + secret_mnemonic + "\"\nPassphrase:\"" + secret_passphrase + "\""
+
+                    offset = 0
+                    secret_raw_hex = secret_dict['secret']
+                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
+                    secret_raw_bytes = bytes.fromhex(secret_raw_hex)
+                    
+                    mnemonic_size = secret_raw_bytes[offset]
+                    offset+=1
+
+                    mnemonic_bytes = secret_raw_bytes[offset:(offset+mnemonic_size)]
+                    offset+=mnemonic_size
+                    try:
+                        mnemonic = mnemonic_bytes.decode("utf-8")
+                    except Exception as ex:
+                        logger.warning(f"Error during mnemonic decoding: {ex}")
+                        mnemonic = f"failed to decode mnemonic bytes: {mnemonic_bytes.hex()}"
+
+                    passphrase_size= secret_raw_bytes[offset]
+                    offset+=1
+
+                    passphrase_bytes= secret_raw_bytes[offset: (offset+passphrase_size)]
+                    offset+=passphrase_size
+                    try:
+                        passphrase = passphrase_bytes.decode("utf-8")
+                    except Exception as ex:
+                        logger.warning(f"Error during passphrase decoding: {ex}")
+                        passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
+
+                    secret_string= f'\nMnemonic: "{mnemonic}" \nPassphrase: "{passphrase}"'  
+
+                elif stype == 'BIP39 mnemonic v2':
+                    # mnemonic in compressed format using entropy (16-32 bytes)
+                    offset = 0
+                    secret_raw_hex = secret_dict['secret']
+                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
+                    secret_raw_bytes = bytes.fromhex(secret_raw_hex)
+                    
+                    wordlist_byte = secret_raw_bytes[offset]
+                    offset+=1
+                    wordlist = BIP39_WORDLIST_DIC.get(wordlist_byte)
+                    if wordlist == None:
+                        logger.critical(f"Error: wordlist byte {wordlist_byte} unsupported!")
+                        exit()
+                    
+                    entropy_size = secret_raw_bytes[offset]
+                    offset+=1
+
+                    entropy_bytes = secret_raw_bytes[offset:(offset+entropy_size)]
+                    offset+=entropy_size
+                    try:
+                        bip39_mnemonic = entropy_to_mnemonic(entropy_bytes, wordlist)
+                    except Exception as ex:
+                        logger.warning(f"Error during entropy conversion: {ex}")
+                        bip39_mnemonic = f"failed to convert entropy: {entropy_bytes.hex()}"
+
+                    passphrase_size= secret_raw_bytes[offset]
+                    offset+=1
+
+                    passphrase_bytes= secret_raw_bytes[offset: (offset+passphrase_size)]
+                    offset+=passphrase_size
+                    try:
+                        passphrase = passphrase_bytes.decode("utf-8")
+                    except Exception as ex:
+                        logger.warning(f"Error during passphrase decoding: {ex}")
+                        passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
+
+                    masterseed_size = secret_raw_bytes[offset]
+                    offset+=1
+
+                    masterseed_bytes= secret_raw_bytes[offset: (offset+masterseed_size)]
+                    offset+=masterseed_size
+                    masterseed_hex= masterseed_bytes.hex()
+
+                    secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'  
 
                 elif stype == 'Password':
-                    secret_dict['secret'] = "\"" + binascii.unhexlify(secret_dict['secret'])[1:].decode() + "\""
-                else:
-                    secret_dict['secret'] = "\"" + secret_dict['secret'][2:] + "\""
+                    secret_string = "\"" + binascii.unhexlify(secret_dict['secret'])[1:].decode() + "\""
 
-                print("Secret (Cleartext):", secret_dict['secret'])
+                else:
+                    secret_string = "\"" + secret_dict['secret'][2:] + "\""
+
+                print("Secret (Cleartext):", secret_string)
+                exit()
 
             else:
                 secret_dict_pubkey = cc.seedkeeper_export_secret(pubkey_id)
