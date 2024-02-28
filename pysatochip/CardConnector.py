@@ -523,7 +523,7 @@ class CardConnector:
         return (response, sw1, sw2)
 
     ###########################################
-    #                        BIP32 commands                      #
+    #              BIP32 commands             #
     ###########################################
 
     def card_bip32_import_seed(self, seed):
@@ -904,7 +904,7 @@ class CardConnector:
         return xpub
        
     ###########################################
-    #                      Signing commands                      #
+    #            Signing commands             #
     ###########################################
     
     def card_sign_message(self, keynbr, pubkey, message, hmac=b'', altcoin=None):
@@ -1289,7 +1289,7 @@ class CardConnector:
             return (msg_out)
 
     ###########################################
-    #                         PIN commands                        #
+    #                PIN commands             #
     ###########################################
     
     def card_create_PIN(self, pin_nbr, pin_tries, pin, ublk):
@@ -1490,7 +1490,7 @@ class CardConnector:
         return (response, sw1, sw2)
         
     ###########################################
-    #                         Secure Channel                        #
+    #            Secure Channel               #
     ###########################################
     
     def card_initiate_secure_channel(self):
@@ -1563,7 +1563,7 @@ class CardConnector:
         return plaintext
         
     #################################
-    #                  SEEDKEEPER              #        
+    #           SEEDKEEPER          #        
     #################################                               
         
     def seedkeeper_generate_masterseed(self, seed_size, export_rights, label:str):
@@ -1621,7 +1621,115 @@ class CardConnector:
             fingerprint= None
             
         return (response, sw1, sw2, id, fingerprint)
+    
+    def seedkeeper_generate_random_secret(self, type:int, subtype:int, size:int, export_rights:int, label:str, save_entropy:int, entropy:str):
+        logger.debug("In seedkeeper_generate_random_secret")
         
+        if (size<16 or size>64):
+            raise RuntimeError('Random secret generation: wrong size')
+
+        # todo check type
+        # todo check save_entropy
+
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA3
+        p1= size
+        p2= export_rights
+        
+        label= list(label.encode('utf-8'))
+        label_size= len(label)
+        entropy= list(entropy.encode('utf-8'))
+        entropy_size= len(entropy)
+
+        data= [type, subtype, save_entropy] + [label_size]+label + [entropy_size] + entropy
+        
+        lc= len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # send apdu
+        dic = {}
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            id= (response[0]<<8)+response[1]
+            logger.debug(f"Random secret generated successfully with id: {id}")
+            fingerprint_list= response[2:2+4]
+            fingerprint= bytes(fingerprint_list).hex()
+            dic['id']= id
+            dic['fingerprint']= fingerprint
+            if len(response)>=12:
+                id2= (response[6]<<8)+response[7]
+                logger.debug(f"Entropy saved successfully with id: {id2}")
+                fingerprint_list2= response[8:8+4]
+                fingerprint2= bytes(fingerprint_list2).hex()  
+                dic['id2']= id2
+                dic['fingerprint2']= fingerprint2
+        else:
+            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            
+        return (response, sw1, sw2, dic)
+
+
+    def seedkeeper_derive_master_password(self, salt, sid, sid_pubkey=None):
+        logger.debug("In seedkeeper_derive_master_password")
+
+        is_secure_export= False if (sid_pubkey is None) else True
+        if (is_secure_export):
+            raise RuntimeError("is_secure_export currently unsupported for seedkeeper_derive_master_password")
+
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xAA
+        p1= 0x02 if is_secure_export else 0x01
+        p2= 0x00
+        
+        if type(salt) == str:
+            salt_list = list(salt.encode('utf-8'))
+        elif type(salt) == bytes:
+            salt_list = list(salt)
+        data= [(sid>>8)%256, sid%256] + [len(salt_list)] + salt_list
+        
+        lc= len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            dic= {}
+            # parse data
+            offset = 0;
+            response_size= len(response)
+            derived_data_size= (response[0]<<8)+response[1]
+            derived_data= response[2:(2+derived_data_size)]
+            dic['derived_data_list']= derived_data
+            dic['derived_data']= bytes(derived_data).hex()
+            full_data = response[0:(2+derived_data_size)]
+            dic['full_data_list']= full_data
+            dic['full_data']= bytes(full_data).hex()
+            offset = 2+derived_data_size
+
+            sign_size=  (response[offset]<<8)+response[offset+1]
+            offset+=2
+            sign= response[offset:(offset+sign_size)]
+
+            # check signature
+            if (sign_size==20):
+                dic['hmac_list']=sign
+                dic['hmac']=bytes(sign).hex()
+            else:
+                try:
+                    self.parser.verify_signature(full_data, sign, self.parser.authentikey)
+                    dic['sign_list']=sign
+                    dic['sign']=bytes(sign).hex()
+                except Exception as ex:
+                    dic['sign_list']=sign
+                    dic['sign']=bytes(sign).hex()
+                    dic['error_msg']= str(ex)
+        else:
+            logger.error(f"Error during master password derivation: {sw1} {sw2}")
+            dic = {}
+        
+        return (response, sw1, sw2, dic)
+
+
     def seedkeeper_import_secret(self, secret_dic, sid_pubkey=None):
         logger.debug("In seedkeeper_import_secret")
         

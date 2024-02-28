@@ -928,6 +928,78 @@ def seedkeeper_generate_2fa_secret(label, export_rights):
 
     print("Imported - SID:", sid, " Fingerprint:", fingerprint)
 
+
+@main.command()
+@click.option("--type", required=True, help="Type of secret to generate (Masterseed, Private_Key, Secret_Key, Master_Password)")
+@click.option("--subtype", type=int, default=0, help="Further specify type of secret, default = 0 (unspecified). To be detailed!")
+@click.option("--size", type=int, default=64, help="Size (in bytes) of the Secret")
+@click.option("--label", required=True, help="Label for the secret")
+@click.option("--export-rights", required=True, help="Export Rights for the secret")
+@click.option("--save-entropy", is_flag=True, help="Save entropy used for secret generation")
+@click.option("--entropy", required=True, help="External entropy used during secret generation")
+def seedkeeper_generate_random_secret(type, subtype, size, label, export_rights, save_entropy, entropy):
+    """Generate a random Secret on-card"""
+
+    # print(f"type: {type}")
+    # print(f"subtype: {subtype}")
+    # print(f"size: {size}")
+    # print(f"label: {label}")
+    # print(f"export_rights: {export_rights}")
+    # print(f"save_entropy: {save_entropy}")
+    # print(f"entropy: {entropy}")
+
+    # Check if secret type and export rights are valid options
+    if type not in ["Private_Key", "Secret_Key", "Master_Password", "Masterseed"]:
+        print(f"INVALID SECRET TYPE, must be one of: [Private_Key, Secret_Key, Master_Password, Masterseed]")
+        exit()
+    if export_rights not in list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS):
+        print("INVALID EXPORT RIGHTS, must be one of:", list_hyphenated_values(SEEDKEEPER_DIC_EXPORT_RIGHTS))
+        exit()
+
+    type = type.replace("_", " ")
+    type = dict_swap_keys_values(SEEDKEEPER_DIC_TYPE)[type]
+
+    export_rights = export_rights.replace("_", " ")
+    export_rights = dict_swap_keys_values(SEEDKEEPER_DIC_EXPORT_RIGHTS)[export_rights]
+
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
+    (response, sw1, sw2, dic) = cc.seedkeeper_generate_random_secret(type, subtype, size, export_rights, label, save_entropy, entropy)
+    if sw1 == 0x90 and sw2 == 0x00:
+        print(f"Random secret generated successfully: {dic}")
+    else:
+        print(f"Failed to generate random secret with error code {hex(256*sw1+sw2)}")
+
+
+@main.command()
+@click.option("--salt", required=True, help="Salt used to derive the master password (max 128 bytes)")
+@click.option("--sid", type=int, required=True, help="SecretID (As per the list-secret-headers command)")
+@click.option("--pubkey-id", type=int, default=None, help="Public Key ID used to encrypt the secret (Optional) Note: Must be the ID of a 'secret' of the type 'Public Key', visible when using the command 'seedkeeper-list-secret-headers'")
+def seedkeeper_derive_master_password(salt, sid, pubkey_id):
+    """Derive data from a master password with provided Salt"""
+
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
+
+    # 
+    (response, sw1, sw2, dic) = cc.seedkeeper_derive_master_password(salt, sid, pubkey_id)
+    if sw1 == 0x90 and sw2 == 0x00:
+        derived_data_hex= dic["derived_data"]
+        print(f"derived_data: {derived_data_hex}")
+    else:
+        print(f"failed to derive data with error code {hex(256*sw1+sw2)}")
+
+
 @main.command()
 @click.option("--type", required=True, help="Plaintext file with secret to import (Raw secret-dict)")
 @click.option("--label", required=True, help="Label for the secret")
@@ -944,7 +1016,6 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
     else:
         pin = getpass("Enter your PIN:")
     cc.card_verify_PIN(pin)
-    #todo: check pin 
 
     # Check if secret type and export rights are valid options
     if type not in list_hyphenated_values(SEEDKEEPER_DIC_TYPE):
@@ -966,7 +1037,11 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
     if use_passphrase:
         bip39_passphrase = input("Enter your BIP39 passphrase:")
 
-    if type in ['Password','BIP39 mnemonic', 'Electrum mnemonic']:
+    if type in ['Password', 'Master Password']:
+        password_list = list(bytes(secret, 'utf-8'))
+        secret_list = [len(password_list)] + password_list
+
+    elif type in ['BIP39 mnemonic', 'Electrum mnemonic']:
         bip39_mnemonic_list = list(bytes(secret, 'utf-8'))
         bip39_passphrase_list = list(bytes(bip39_passphrase, 'utf-8'))
 
@@ -997,13 +1072,23 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
         except Exception as e:
             exit(e)
 
-        secret_list = ([wordlist_byte] + 
+        # secret_list = ([wordlist_byte] + 
+        #                 [len(bip39_entropy_list)] + 
+        #                 bip39_entropy_list + 
+        #                 [len(bip39_passphrase_list)] + 
+        #                 bip39_passphrase_list +
+        #                 [len(masterseed_list)] + 
+        #                 masterseed_list
+        #                 )
+
+        # this format is backward compatible with Masterseed, this facilitates encrypted export to satochip
+        secret_list = ([len(masterseed_list)] + 
+                        masterseed_list + 
+                        [wordlist_byte] + 
                         [len(bip39_entropy_list)] + 
                         bip39_entropy_list + 
                         [len(bip39_passphrase_list)] + 
-                        bip39_passphrase_list +
-                        [len(masterseed_list)] + 
-                        masterseed_list
+                        bip39_passphrase_list
                         )
     else:
         secret_list = list(bytes.fromhex(secret))
@@ -1132,13 +1217,66 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
 
                     secret_string= f'\nMnemonic: "{mnemonic}" \nPassphrase: "{passphrase}"'  
 
+                # elif stype == 'BIP39 mnemonic v2':
+                #     # mnemonic in compressed format using entropy (16-32 bytes)
+                #     offset = 0
+                #     secret_raw_hex = secret_dict['secret']
+                #     logger.info(f"secret_raw_hex: {secret_raw_hex}")
+                #     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
+                    
+                #     wordlist_byte = secret_raw_bytes[offset]
+                #     offset+=1
+                #     wordlist = BIP39_WORDLIST_DIC.get(wordlist_byte)
+                #     if wordlist == None:
+                #         logger.critical(f"Error: wordlist byte {wordlist_byte} unsupported!")
+                #         exit()
+                    
+                #     entropy_size = secret_raw_bytes[offset]
+                #     offset+=1
+
+                #     entropy_bytes = secret_raw_bytes[offset:(offset+entropy_size)]
+                #     offset+=entropy_size
+                #     try:
+                #         bip39_mnemonic = entropy_to_mnemonic(entropy_bytes, wordlist)
+                #     except Exception as ex:
+                #         logger.warning(f"Error during entropy conversion: {ex}")
+                #         bip39_mnemonic = f"failed to convert entropy: {entropy_bytes.hex()}"
+
+                #     passphrase_size= secret_raw_bytes[offset]
+                #     offset+=1
+
+                #     passphrase_bytes= secret_raw_bytes[offset: (offset+passphrase_size)]
+                #     offset+=passphrase_size
+                #     try:
+                #         passphrase = passphrase_bytes.decode("utf-8")
+                #     except Exception as ex:
+                #         logger.warning(f"Error during passphrase decoding: {ex}")
+                #         passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
+
+                #     masterseed_size = secret_raw_bytes[offset]
+                #     offset+=1
+
+                #     masterseed_bytes= secret_raw_bytes[offset: (offset+masterseed_size)]
+                #     offset+=masterseed_size
+                #     masterseed_hex= masterseed_bytes.hex()
+
+                #     secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'  
+
                 elif stype == 'BIP39 mnemonic v2':
+                    # this format is backward compatible with Masterseed (BIP39 info appended after Masterseed)
                     # mnemonic in compressed format using entropy (16-32 bytes)
-                    offset = 0
                     secret_raw_hex = secret_dict['secret']
                     logger.info(f"secret_raw_hex: {secret_raw_hex}")
                     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
                     
+                    offset = 0
+                    masterseed_size = secret_raw_bytes[offset]
+                    offset+=1
+
+                    masterseed_bytes= secret_raw_bytes[offset: (offset+masterseed_size)]
+                    offset+=masterseed_size
+                    masterseed_hex= masterseed_bytes.hex()
+
                     wordlist_byte = secret_raw_bytes[offset]
                     offset+=1
                     wordlist = BIP39_WORDLIST_DIC.get(wordlist_byte)
@@ -1167,13 +1305,6 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                     except Exception as ex:
                         logger.warning(f"Error during passphrase decoding: {ex}")
                         passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
-
-                    masterseed_size = secret_raw_bytes[offset]
-                    offset+=1
-
-                    masterseed_bytes= secret_raw_bytes[offset: (offset+masterseed_size)]
-                    offset+=masterseed_size
-                    masterseed_hex= masterseed_bytes.hex()
 
                     secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'  
 
