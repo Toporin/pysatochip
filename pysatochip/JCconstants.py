@@ -25,10 +25,10 @@ MAX_CARD_LABEL_SIZE = 64
 ###################################
 
 SEEDKEEPER_DIC_TYPE = {
+    0x10: 'Masterseed', 
     0x30: 'BIP39 mnemonic', 
     0x31: 'BIP39 mnemonic v2', 
     0x40: 'Electrum mnemonic', 
-    0x10: 'Masterseed', 
     0x60: 'Private Key',
     0x70: 'Public Key',
     0x80: 'Secret Key',

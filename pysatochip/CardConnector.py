@@ -1661,8 +1661,8 @@ class CardConnector:
                 logger.debug(f"Entropy saved successfully with id: {id2}")
                 fingerprint_list2= response[8:8+4]
                 fingerprint2= bytes(fingerprint_list2).hex()  
-                dic['id2']= id2
-                dic['fingerprint2']= fingerprint2
+                dic['id_entropy']= id2
+                dic['fingerprint_entropy']= fingerprint2
         else:
             logger.error(f"Error during masterseed generation: {sw1} {sw2}")
             
@@ -1954,16 +1954,20 @@ class CardConnector:
         apdu=[cla, ins, p1, p2, lc]+data
         
         # send call
+        dic ={}
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1==0x90 and sw2==0x00):
-            return True
+            dic["is_reset"] = True
+            return response, sw1, sw2, dic
         elif (sw1==0x9C and sw2==0x08):
             # logger.debug(f"Error 0x9C08: Secret not found!")
             # raise SeedKeeperError("Reset secret failed: secret not found?")
-            return False
+            dic["is_reset"] = False
+            return response, sw1, sw2, dic
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
             raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+
 
     def seedkeeper_print_logs(self, print_all=True):
         logger.debug("In seedkeeper_print_logs")

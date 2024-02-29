@@ -291,10 +291,10 @@ def common_set_nfc_policy(nfc_policy):
 
 @main.command()
 @click.option("--label", default="", help="Card Label")
-@click.option("--satodime", is_flag=True, help="Card PIN")
-def common_initial_setup(label, satodime):
+def common_initial_setup(label):
     """Run the initial card setup process"""
-    if satodime:
+
+    if cc.card_type == "Satodime":
         pin_0 = list("1234".encode('utf8')) # This isn't actually used in Satodime, so can be anything
     else:
         pin = getpass("Enter your PIN:")
@@ -322,18 +322,18 @@ def common_initial_setup(label, satodime):
 
     (response, sw1, sw2) = cc.card_setup(pin_tries_0, ublk_tries_0, pin_0, ublk_0, pin_tries_1, ublk_tries_1, pin_1, ublk_1, secmemsize, memsize, create_object_ACL, create_key_ACL, create_pin_ACL, option_flags=0, hmacsha160_key=None, amount_limit=0)
     if sw1 != 0x90 or sw2 != 0x00:
-        if satodime:
+        if cc.card_type == "Satodime":
             print("Error: Claim Satodime Ownership Failed")
         else:
             print("ERROR: Setup Failed")
         exit()
     else:
-        if satodime:
+        if cc.card_type == "Satodime":
             print("Success: Satodime Ownership Claimed")
         else:
             print("Setup Succeeded")
 
-    if satodime:
+    if cc.card_type == "Satodime":
         unlock_counter = response[0:SIZE_UNLOCK_COUNTER]
         unlock_secret = response[SIZE_UNLOCK_COUNTER:(SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_SECRET)]
         print()
@@ -1398,8 +1398,8 @@ def seedkeeper_reset_secret(sid):
             pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
         
-            is_reset = cc.seedkeeper_reset_secret(sid)
-            if is_reset:
+            response, sw1, sw2, dic = cc.seedkeeper_reset_secret(sid)
+            if dic["is_reset"]:
                 print("Secret reset successfully!")
             else:
                 print("Failed to reset secret (secret not found?).")
