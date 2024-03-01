@@ -72,10 +72,11 @@ class SeedKeeperTest(unittest.TestCase):
             # todo: check card type!
             
             # check version
+            v_supported= SEEDKEEPER_PROTOCOL_VERSION 
+            cls.v_applet= d["protocol_version"] 
+            logger.info(f"SeedKeeper version={cls.v_applet} Electrum supported version= {v_supported}") #debugSatochip
+
             if  (cls.cc.setup_done):
-                v_supported= SEEDKEEPER_PROTOCOL_VERSION 
-                cls.v_applet= d["protocol_version"] 
-                logger.info(f"SeedKeeper version={cls.v_applet} Electrum supported version= {v_supported}") #debugSatochip
                 if (cls.cc.needs_secure_channel):
                     cls.cc.card_initiate_secure_channel()
                 break 
@@ -597,6 +598,10 @@ class SeedKeeperTest(unittest.TestCase):
         # Bip32 test vectors 1 (https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#Test_Vectors)
         print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector1:") #debugSatochip
         
+        # introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            return
+
         seed_hex= "000102030405060708090a0b0c0d0e0f"
         seed_list= list(bytes.fromhex(seed_hex)) 
         secret_list= [len(seed_list)]+seed_list
@@ -660,6 +665,10 @@ class SeedKeeperTest(unittest.TestCase):
     def test_card_bip32_get_extendedkey_seed_vector2(self):
         print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector2:") #debugSatochip
         
+        # introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            return
+
         seed_hex= "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542"
         seed_list= list(bytes.fromhex(seed_hex)) 
         secret_list= [len(seed_list)]+seed_list
@@ -721,6 +730,10 @@ class SeedKeeperTest(unittest.TestCase):
     def test_card_bip32_get_extendedkey_seed_vector3(self):
         print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector3:") #debugSatochip
         
+        # introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            return
+
         seed_hex= "4b381541583be4423346c643850da4b320e46a87ae3d2a4e6da11eba819cd4acba45d239319ac14f863b8d5ab5a0d0c64d2e8a1e7d1457df2e5a3c51c73235be"
         seed_list= list(bytes.fromhex(seed_hex)) 
         secret_list= [len(seed_list)]+seed_list
@@ -761,6 +774,87 @@ class SeedKeeperTest(unittest.TestCase):
                 self.assertEqual(xprv, xprvs[i])
 
         # test delete seed
+        response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
+        self.assertEqual(dic["is_reset"], True) 
+
+    #@unittest.skip("debug")
+    def test_card_bip32_get_extendedkey_bip85(self):
+
+        # introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            return
+
+        # vectors generated using https://iancoleman.io/bip39/#english
+        wordlist = "english"
+        MNEMONIC = Mnemonic(language=wordlist)
+        #bip39= MNEMONIC.generate(strength=128)
+        bip39 = "panel rally element develop cloud diamond brother rack scale path burger arctic"
+        masterseed = "d42b84073d7b0a6ceae2b37eeeffa5f763678f1cbf17f22ed2f8a38401528c769744fb5020ce05bc4e1f33dfb0d1d716c528d18dcfa2ab08c7efcee8655148f2"
+        xprv = "xprv9s21ZrQH143K4MUxTrPj2uJL5rvsAWYEhR5RxsC6tKAVoCyWhrdhD6JEgPmEoJCCKKyNLTFiCwvbBsKjmiobg3WQQT64EFnJ6SEvMkRWydx"
+        bip85_childkey = "devote sheriff detail immense current online clown letter loop spread weasel filter"
+        # path m/83696968'/39'/{language}'/{words}'/{index}'
+        path= "m/83696968'/39'/0'/12'/0'"
+
+        # make header
+        export_rights = 0x01 ^ 0x10 #0x11 # 'Plaintext export allowed' and 'Plaintext usage allowed'
+        stype = 'BIP39 mnemonic v2'
+        label = f"Test BIP85 with BIP39v2 {len(bip39.split())} words"
+        header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
+        #print(f"Label: {label}")
+
+        # format secret
+        wordlist_byte = 0x00 # english
+    
+        try:
+            bip39_entropy_bytes = mnemonic_to_entropy(bip39, wordlist)
+            bip39_entropy_list = list(bip39_entropy_bytes)
+        except Exception as ex:
+            print(f"Error: failed to convert mnemonic {bip39} to entropy!")
+
+        bip39_passphrase = ""
+        bip39_passphrase_list = list(bytes(bip39_passphrase, 'utf-8'))
+        try:
+            masterseed_bytes= mnemonic_to_masterseed(bip39, bip39_passphrase, 'BIP39 mnemonic')
+            masterseed_list = list(masterseed_bytes)
+        except Exception as ex:
+            print(f"Error: failed to convert mnemonic {bip39} to masterseed!")
+
+        # this format is backward compatible with Masterseed, this facilitates encrypted export to satochip
+        secret_list = ([len(masterseed_list)] + 
+                        masterseed_list + 
+                        [wordlist_byte] + 
+                        [len(bip39_entropy_list)] + 
+                        bip39_entropy_list + 
+                        [len(bip39_passphrase_list)] + 
+                        bip39_passphrase_list
+                        )
+
+        secret_dic={'header':header, 'secret_list':secret_list}
+        # import in plaintext
+        (sid, fingerprint)=  SeedKeeperTest.cc.seedkeeper_import_secret(secret_dic, sid_pubkey=None)
+        
+        # export masterseed in plaintext
+        sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
+        self.assertEqual(sdict['id'], sid)
+        self.assertEqual(sdict['type'], 0x31) # 'BIP39 mnemonic v2'
+        self.assertEqual(sdict['origin'], 0x01)
+        self.assertEqual(sdict['export_rights'], export_rights)
+        self.assertEqual(sdict['label'], label) 
+        self.assertEqual(sdict['secret_list'], secret_list) 
+        masterseed2= bytes(masterseed_list).hex()
+        print(f"masterseed2: {masterseed2}")
+        self.assertEqual(masterseed, masterseed2) 
+
+        # test BIP85 derivation on card
+        entropy_bytes=  SeedKeeperTest.cc.card_bip32_get_extendedkey(path, sid=sid, option_flags=0x04)
+        #print(entropy_bytes.hex())
+
+        # get Bip39 from entropy
+        bip39_from_entropy = entropy_to_mnemonic(entropy_bytes[0:16], wordlist) # 16 bytes of entropy for 12 words
+        #print(f"bip39_from_entropy: {bip39_from_entropy}")
+        self.assertEqual(bip39_from_entropy, bip85_childkey)
+
+        # test delete BIP39v2 seed
         response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
         self.assertEqual(dic["is_reset"], True) 
 

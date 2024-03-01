@@ -873,28 +873,28 @@ class CardConnector:
             # other (unexpected) error
             if (sw1!=0x90) or (sw2!=0x00):
                 raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})')
-            # check for non-hardened child derivation optimization
-            elif ( (response[32]&0x80)== 0x80):
-                logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
-                (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
-                coordy= pubkey.get_public_key_bytes(compressed=False)
-                coordy= list(coordy[33:])
-                authcoordy= self.parser.authentikey.get_public_key_bytes(compressed=False)
-                authcoordy= list(authcoordy[33:])
-                data= response+[len(coordy)&0xFF00, len(coordy)&0x00FF]+coordy
-                apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]
-                apdu_opt= apdu_opt+data
-                response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
-            #at this point, we have successfully received a response from the card
-            else:
-                if (option_flags & 0x02) == 0x00: # pubkey
+            if (sw1==0x90) and (sw2==0x00):
+                if (option_flags & 0x04) == 0x04: # BIP85
+                    entropy_bytes= self.parser.parse_bip32_get_extendedkey_bip85(response)
+                    return entropy_bytes
+                elif (option_flags & 0x02) == 0x00: # BIP32 pubkey
+                    if ( (response[32]&0x80)== 0x80):
+                        logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
+                        (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
+                        coordy= pubkey.get_public_key_bytes(compressed=False)
+                        coordy= list(coordy[33:])
+                        authcoordy= self.parser.authentikey.get_public_key_bytes(compressed=False)
+                        authcoordy= list(authcoordy[33:])
+                        data= response+[len(coordy)&0xFF00, len(coordy)&0x00FF]+coordy
+                        apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]
+                        apdu_opt= apdu_opt+data
+                        response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
+
                     (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
                     return (pubkey, chaincode)
-                else: # privkey
+                else: # BIP32 privkey
                     (privkey, chaincode)= self.parser.parse_bip32_get_extended_privkey(response)
                     return (privkey, chaincode)
-
-
 
     def card_bip32_get_xpub(self, path, xtype, is_mainnet, sid=None):
         ''' Get the BIP32 xpub for given path.

@@ -163,6 +163,40 @@ class CardDataParser:
 
         return (self.privkey, self.chaincode)
 
+    
+    def parse_bip32_get_extendedkey_bip85(self, response):
+        logger.debug("In parse_bip32_get_extendedkey_bip85")
+        if self.authentikey is None:
+            raise ValueError("Authentikey not set!")
+
+        logger.debug(f"[CardDataParser] parse_bip32_get_extendedkey_bip85: response_hex: {bytes(response).hex()}")
+
+        # double signature: first is self-signed, second by authentikey
+        # firs self-signed sig: data= coordx
+        logger.debug('[CardDataParser] parse_bip32_get_extendedkey_bip85: first signature recovery')
+        entropy_size = ((response[0] & 0xff)<<8) + (response[1] & 0xff)
+        entropy_bytes= bytes(response[2:2+entropy_size])
+        msg_size= 2+entropy_size
+        msg= response[0:msg_size]
+        sig_size = ((response[msg_size] & 0xff)<<8) + (response[msg_size+1] & 0xff)
+        signature= response[(msg_size+2):(msg_size+2+sig_size)]
+        if sig_size==0:
+           raise ValueError("Signature missing")
+        
+
+        # second signature by authentikey
+        logger.debug('[CardDataParser] parse_bip32_get_extendedkey_bip85: second signature recovery')
+        msg2_size= msg_size+2+sig_size
+        msg2= response[0:msg2_size]
+        sig2_size = ((response[msg2_size] & 0xff)<<8) + (response[msg2_size+1] & 0xff)
+        signature2= response[(msg2_size+2):(msg2_size+2+sig2_size)]
+        authentikey= self.get_pubkey_from_signature(self.authentikey_coordx, msg2, signature2)
+        if authentikey != self.authentikey:
+            raise ValueError("The seed used to create this wallet file no longer matches the seed of the Satochip device!\n\n"+MSG_WARNING)
+
+        return entropy_bytes
+
+
     def parse_initiate_secure_channel(self, response):
             logger.debug("In parse_initiate_secure_channel")
             # double signature: first is self-signed, second by authentikey (optional)
