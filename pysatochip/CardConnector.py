@@ -55,6 +55,21 @@ XPUB_HEADERS_TESTNET = {
         'p2wpkh':      '045f1cf6',  # vpub
         'p2wsh':       '02575483',  # Vpub
     }
+# based on https://github.com/spesmilo/electrum/blob/master/electrum/constants.py
+XPRV_HEADERS_MAINNET = {
+        'standard':    '0488ade4',  # xprv
+        'p2wpkh-p2sh': '049d7878',  # yprv
+        'p2wsh-p2sh':  '0295b005',  # Yprv
+        'p2wpkh':      '04b2430c',  # zprv
+        'p2wsh':       '02aa7a99',  # Zprv
+    }
+XPRV_HEADERS_TESTNET = {
+        'standard':    '04358394',  # tprv
+        'p2wpkh-p2sh': '044a4e28',  # uprv
+        'p2wsh-p2sh':  '024285b5',  # Uprv
+        'p2wpkh':      '045f18bc',  # vprv
+        'p2wsh':       '02575048',  # Vprv
+    }
 
 # simple observer that will print on the console the card connection events.
 class LogCardConnectionObserver(CardConnectionObserver):
@@ -813,11 +828,12 @@ class CardConnector:
             (response, sw1, sw2) = self.card_transmit(apdu)
         return authentikey
     
-    def card_bip32_get_extendedkey(self, path):
+    def card_bip32_get_extendedkey(self, path, sid=None, option_flags=0x40):
         ''' Get the BIP32 extended key for given path
         
         Parameters: 
         path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
+        sid (int): for SeedKeeper, this is the secret_id of the masterseed that we want to use for derivation
 
         Returns: 
         pubkey: ECPubkey object
@@ -830,10 +846,15 @@ class CardConnector:
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_BIP32_GET_EXTENDED_KEY
         p1= len(path)//4
-        p2= 0x40 #option flags: 0x80:erase cache memory - 0x40: optimization for non-hardened child derivation
+        p2= option_flags #option flags: 0x80:erase cache memory - 0x40: optimization for non-hardened child derivation
         lc= len(path)
-        apdu=[cla, ins, p1, p2, lc]
-        apdu+= path
+
+        data = list(path)
+        if sid is not None:
+            data = data + [(sid>>8)%256, sid%256]
+        lc= len(data)
+
+        apdu=[cla, ins, p1, p2, lc] + data
 
         if self.parser.authentikey is None:
             self.card_bip32_get_authentikey()
@@ -866,16 +887,23 @@ class CardConnector:
                 response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
             #at this point, we have successfully received a response from the card
             else:
-                (key, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
-                return (key, chaincode)
+                if (option_flags & 0x02) == 0x00: # pubkey
+                    (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
+                    return (pubkey, chaincode)
+                else: # privkey
+                    (privkey, chaincode)= self.parser.parse_bip32_get_extended_privkey(response)
+                    return (privkey, chaincode)
 
-    def card_bip32_get_xpub(self, path, xtype, is_mainnet):
+
+
+    def card_bip32_get_xpub(self, path, xtype, is_mainnet, sid=None):
         ''' Get the BIP32 xpub for given path.
         
         Parameters: 
         path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
         xtype (str): the type of transaction such as  'standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh'
         is_mainnet (bool): is mainnet or testnet 
+        sid (int): for SeedKeeper, this is the secret_id of the masterseed that we want to use for derivation
         
         Returns: 
         xpub (str): the corresponding xpub value
@@ -887,12 +915,12 @@ class CardConnector:
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
         
-        (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath)
+        (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath, sid)
         if depth == 0: #masterkey
             fingerprint= bytes([0,0,0,0])
             child_number= bytes([0,0,0,0])
         else: #get parent info
-            (parentkey, parentchaincode)= self.card_bip32_get_extendedkey(bytepath[0:-4])
+            (parentkey, parentchaincode)= self.card_bip32_get_extendedkey(bytepath[0:-4], sid)
             fingerprint= hash_160(parentkey.get_public_key_bytes(compressed=True))[0:4]
             child_number= bytepath[-4:]
         
@@ -902,6 +930,41 @@ class CardConnector:
         xpub= EncodeBase58Check(xpub)
         logger.info(f"card_bip32_get_xpub(): xpub={str(xpub)}")#debugSatochip
         return xpub
+
+    def card_bip32_get_xprv(self, path, xtype, is_mainnet, sid=None):
+        ''' Get the BIP32 xpriv for given path. 
+        Only suitable for SeedKeeper, Satochip does NOT allow export of private keys by design.
+        
+        Parameters: 
+        path (str | bytes): the path; if given as a string, it will be converted to bytes (4 bytes for each path index)
+        xtype (str): the type of transaction such as  'standard', 'p2wpkh-p2sh', 'p2wpkh', 'p2wsh-p2sh', 'p2wsh'
+        is_mainnet (bool): is mainnet or testnet 
+        sid (int): for SeedKeeper, this is the secret_id of the masterseed that we want to use for derivation
+        
+        Returns: 
+        xpriv (str): the corresponding xpriv value
+        '''
+        logger.info(f"card_bip32_get_xpriv(): path={str(path)}")#debugSatochip
+        if (type(path)==str):
+            (depth, bytepath)= self.parser.bip32path2bytes(path)
+        
+        option_flags= 0x02 # request privkey
+        (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath, sid, option_flags)
+        if depth == 0: #masterkey
+            fingerprint= bytes([0,0,0,0])
+            child_number= bytes([0,0,0,0])
+        else: #get parent info
+            (parentkey, parentchaincode)= self.card_bip32_get_extendedkey(bytepath[0:-4], sid, option_flags)
+            fingerprint= hash_160(parentkey.get_public_key_bytes(compressed=True))[0:4]
+            child_number= bytepath[-4:]
+        
+        xprv_header= XPRV_HEADERS_MAINNET[xtype] if is_mainnet else XPPRV_HEADERS_TESTNET[xtype]
+        xprv = bytes.fromhex(xprv_header) + bytes([depth]) + fingerprint + child_number + childchaincode + bytes([0x00]) + childkey.get_private_key_bytes()
+        assert(len(xprv)==78)
+        xprv= EncodeBase58Check(xprv)
+        logger.info(f"card_bip32_get_xpub(): xprv={str(xprv)}")#debugSatochip
+        return xprv
+
        
     ###########################################
     #            Signing commands             #

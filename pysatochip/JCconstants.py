@@ -41,13 +41,15 @@ SEEDKEEPER_DIC_TYPE = {
 }
 
 SEEDKEEPER_DIC_ORIGIN = {0x01: 'Plaintext import', 0x02: 'Encrypted import', 0x03: 'Generated on card'}
-SEEDKEEPER_DIC_EXPORT_RIGHTS = {0x01: 'Plaintext export allowed', 0x02: 'Encrypted export only', 0x03: 'Export forbidden'}
+SEEDKEEPER_DIC_EXPORT_RIGHTS = {0x00: 'Export forbidden', 0x01: 'Plaintext export allowed', 0x02: 'Encrypted export only', 0x03: 'Authenticated export only'}
+SEEDKEEPER_DIC_USAGE_RIGHTS = {0x00: 'Usage forbidden', 0x10: 'Plaintext usage allowed', 0x20: 'Encrypted usage only', 0x30: 'Authenticated usage only'}
 
 SEEDKEEPER_LOG_INS_DIC = {
     0x40: 'Create PIN', 
     0x42: 'Verify PIN', 
     0x44: 'Change PIN', 
     0x46: 'Unblock PIN',
+    0x6D: 'Get BIP32 extended key',
     0xA0: 'Generate masterseed', 
     0xA5: 'Reset secret', 
     0xAE: 'Generate 2FA Secret',

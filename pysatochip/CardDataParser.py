@@ -25,7 +25,7 @@ from struct import pack, unpack
 from ecdsa.curves import SECP256k1
 from ecdsa.util import sigdecode_der
 
-from .ecc import ECPubkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
+from .ecc import ECPubkey, ECPrivkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 from .JCconstants import *
 from .slip44 import *
 
@@ -128,6 +128,40 @@ class CardDataParser:
             raise ValueError("The seed used to create this wallet file no longer matches the seed of the Satochip device!\n\n"+MSG_WARNING)
 
         return (self.pubkey, self.chaincode)
+
+    def parse_bip32_get_extended_privkey(self, response):
+        logger.debug("In parse_bip32_get_extended_privkey")
+        if self.authentikey is None:
+            raise ValueError("Authentikey not set!")
+
+        # double signature: first is self-signed, second by authentikey
+        # firs self-signed sig: data= coordx
+        logger.debug('[CardDataParser] parse_bip32_get_extended_privkey: first signature recovery')
+        self.chaincode= bytearray(response[0:32])
+        data_size = ((response[32] & 0x7f)<<8) + (response[33] & 0xff) # (response[32] & 0x80) is ignored (optimization flag)
+        data= response[34:(32+2+data_size)]
+        msg_size= 32+2+data_size
+        msg= response[0:msg_size]
+        sig_size = ((response[msg_size] & 0xff)<<8) + (response[msg_size+1] & 0xff)
+        signature= response[(msg_size+2):(msg_size+2+sig_size)]
+        if sig_size==0:
+           raise ValueError("Signature missing")
+        # self-signed
+        privkey_list=data
+        self.privkey= ECPrivkey(bytes(privkey_list)) #self.get_pubkey_from_signature(coordx, msg, signature)
+        #self.pubkey_coordx= coordx
+
+        # second signature by authentikey
+        logger.debug('[CardDataParser] parse_bip32_get_extended_privkey: second signature recovery')
+        msg2_size= msg_size+2+sig_size
+        msg2= response[0:msg2_size]
+        sig2_size = ((response[msg2_size] & 0xff)<<8) + (response[msg2_size+1] & 0xff)
+        signature2= response[(msg2_size+2):(msg2_size+2+sig2_size)]
+        authentikey= self.get_pubkey_from_signature(self.authentikey_coordx, msg2, signature2)
+        if authentikey != self.authentikey:
+            raise ValueError("The seed used to create this wallet file no longer matches the seed of the Satochip device!\n\n"+MSG_WARNING)
+
+        return (self.privkey, self.chaincode)
 
     def parse_initiate_secure_channel(self, response):
             logger.debug("In parse_initiate_secure_channel")
