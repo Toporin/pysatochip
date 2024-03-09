@@ -471,7 +471,8 @@ def satochip_import_trusted_pubkey(pubkey):
         else:
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
-        cc.card_import_trusted_pubkey(pubkey)
+        pubkey_hex = cc.card_import_trusted_pubkey(pubkey)
+        print(f"Successfully imported trusted_pubkey: {pubkey_hex}")
     except Exception as e:
         print(e)
 
@@ -1108,6 +1109,9 @@ def seedkeeper_import_secret(type, subtype, label, export_rights, use_passphrase
                         [len(bip39_passphrase_list)] + 
                         bip39_passphrase_list
                         )
+    elif type == 'Public Key':
+        secret_list = list(bytes.fromhex(secret))
+        secret_list = [len(secret_list)] + secret_list
     else:
         secret_list = list(bytes.fromhex(secret))
 
@@ -1195,17 +1199,7 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
             if pubkey_id is None: #If we are exporting in the clear
                 #if 'mnemonic' in stype:
                 if stype in ['BIP39 mnemonic', 'Electrum mnemonic']:
-                    # # todo: do not modify secret_dict['secret'] but use new variables?
-                    # secret_dict['secret'] = binascii.unhexlify(secret_dict['secret'])[1:].decode().rstrip("\x00")
-
-                    # bip39_secret = secret_dict['secret']
-
-                    # secret_size = secret_dict['secret_list'][0]
-                    # secret_mnemonic = bip39_secret[:secret_size]
-                    # secret_passphrase = bip39_secret[secret_size + 1:]
-
-                    # secret_string = "\nMnemonic:\"" + secret_mnemonic + "\"\nPassphrase:\"" + secret_passphrase + "\""
-
+                    
                     offset = 0
                     secret_raw_hex = secret_dict['secret']
                     logger.info(f"secret_raw_hex: {secret_raw_hex}")
@@ -1359,6 +1353,46 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                 }
                 print("Secret Export (JSON to Import into another card/device)")
                 print(json.dumps(secret_obj))
+    except Exception as e:
+        print(e)
+
+@main.command()
+@click.option("--sid", type=int, required=True, help="SecretID (As per the list-secret-headers command)")
+@click.option("--pubkey-id", type=int, default=None, help="Public Key ID used to encrypt the secret (Optional) Note: Must be the ID of a 'secret' of the type 'Public Key', visible when using the command 'seedkeeper-list-secret-headers'")
+def seedkeeper_export_secret_to_satochip(sid, pubkey_id):
+    """Export a Secret from the Seedkeeper in format suitable to satochip"""
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        secret_dict = cc.seedkeeper_export_secret_to_satochip(sid, pubkey_id)
+        
+        secret_dict_pubkey = cc.seedkeeper_export_secret(pubkey_id)
+        authentikey_importer = secret_dict_pubkey['secret'][2:]  # [0:2] is the pubkey_size in hex
+        secret_obj = {
+            'authentikey_exporter': cc.parser.authentikey.get_public_key_bytes(False).hex(),
+            'authentikey_importer': authentikey_importer,
+            'secrets': [{
+                'label': secret_dict['label'],
+                'type': secret_dict['type'],
+                'origin': secret_dict['origin'],
+                'export_rights': secret_dict['export_rights'],
+                'rfu1': secret_dict['rfu1'],
+                'rfu2': secret_dict['rfu2'],
+                'fingerprint': secret_dict['fingerprint'],
+                'header': secret_dict['header'],  # bytes(secret_dict['header']).hex(),
+                'iv': secret_dict['iv'],  # bytes(secret_dict['iv']).hex(),
+                'secret_encrypted': secret_dict['secret_encrypted'],
+                # bytes(secret_list).hex(),  #'secret_base64':base64.encodebytes( bytes(secret_list) ).decode('utf8')
+                'hmac': secret_dict['hmac'],  # bytes(secret_dict['hmac']).hex(),
+            }],
+        }
+        print("Secret Export (JSON to Import into another card/device)")
+        print(json.dumps(secret_obj))
     except Exception as e:
         print(e)
 

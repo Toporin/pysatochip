@@ -421,9 +421,9 @@ class SeedKeeperTest(unittest.TestCase):
 
             # make header
             export_rights = 'Plaintext export allowed'
-            stype = 'BIP39 mnemonic v2'
+            stype = 'Masterseed' #'BIP39 mnemonic v2'
             label = f"Test BIP39v2 {len(bip39.split())} words"
-            header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
+            header = SeedKeeperTest.cc.make_header(stype, export_rights, label, subtype=0x01)
             #print(f"Label: {label}")
 
             # format secret
@@ -462,11 +462,11 @@ class SeedKeeperTest(unittest.TestCase):
             # export in plaintext
             sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
             self.assertEqual(sdict['id'], sid)
-            self.assertEqual(sdict['type'], 0x31) # 'BIP39 mnemonic v2'
+            self.assertEqual(sdict['type'], 0x10) # 'Masterseed'
             self.assertEqual(sdict['origin'], 0x01)
             self.assertEqual(sdict['export_rights'], 0x01) # 'Plaintext export allowed'
             self.assertEqual(sdict['fingerprint'], fingerprint) 
-            self.assertEqual(sdict['rfu1'], 0x00) 
+            self.assertEqual(sdict['rfu1'], 0x01) 
             self.assertEqual(sdict['rfu2'], 0x00) 
             self.assertEqual(sdict['label'], label) 
             self.assertEqual(sdict['secret_list'], secret_list) 
@@ -797,9 +797,9 @@ class SeedKeeperTest(unittest.TestCase):
 
         # make header
         export_rights = 0x01 #'Plaintext export allowed'
-        stype = 'BIP39 mnemonic v2'
+        stype = 'Masterseed' #'BIP39 mnemonic v2'
         label = f"Test BIP85 with BIP39v2 {len(bip39.split())} words"
-        header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
+        header = SeedKeeperTest.cc.make_header(stype, export_rights, label, subtype=0x01)
         #print(f"Label: {label}")
 
         # format secret
@@ -836,7 +836,7 @@ class SeedKeeperTest(unittest.TestCase):
         # export masterseed in plaintext
         sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
         self.assertEqual(sdict['id'], sid)
-        self.assertEqual(sdict['type'], 0x31) # 'BIP39 mnemonic v2'
+        self.assertEqual(sdict['type'], 0x10) # 'Masterseed'
         self.assertEqual(sdict['origin'], 0x01)
         self.assertEqual(sdict['export_rights'], export_rights)
         self.assertEqual(sdict['label'], label) 
@@ -921,7 +921,7 @@ class SeedKeeperTest(unittest.TestCase):
             # export secret
             sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
             self.assertEqual(sdict['id'], sid)
-            self.assertEqual(sdict['type'], 0xd0) # 'BIP39 mnemonic v2'
+            self.assertEqual(sdict['type'], 0xc0)
             self.assertEqual(sdict['origin'], 0x01)
             self.assertEqual(sdict['export_rights'], 0x01)
             self.assertEqual(sdict['secret_list'], secrets[index]) 
@@ -985,7 +985,7 @@ class SeedKeeperTest(unittest.TestCase):
             # export secret
             sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
             self.assertEqual(sdict['id'], sid)
-            self.assertEqual(sdict['type'], 0xd0) # 'BIP39 mnemonic v2'
+            self.assertEqual(sdict['type'], 0xc0) 
             self.assertEqual(sdict['origin'], 0x01)
             self.assertEqual(sdict['export_rights'], 0x01)
             self.assertEqual(sdict['secret_list'], secrets[index]) 

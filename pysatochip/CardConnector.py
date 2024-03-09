@@ -689,6 +689,9 @@ class CardConnector:
             logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
             raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
         
+        if self.parser.authentikey is None:
+            self.parser.authentikey = self.card_export_authentikey()
+
         pubkey_hex=self.parser.get_trusted_pubkey(response)
         return pubkey_hex
         
@@ -1939,8 +1942,8 @@ class CardConnector:
         cla= JCconstants.CardEdge_CLA
         ins= 0xA2
         p1= 0x02 if is_secure_export else 0x01
-        p2= 0x01
-        
+        p2= 0x01 # init
+
         data= [(sid>>8)%256, sid%256]
         if (is_secure_export):
             data+=[(sid_pubkey>>8)%256, sid_pubkey%256]
@@ -1967,7 +1970,8 @@ class CardConnector:
         else:
             logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
             raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
-            
+        #TODO add more SW support
+
         # parse header
         secret_dict= self.parser.parse_seedkeeper_header(response)
         # iv
@@ -2037,6 +2041,73 @@ class CardConnector:
             else:
                 logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
             
+        return secret_dict
+
+    def seedkeeper_export_secret_to_satochip(self, sid, sid_pubkey):
+        logger.debug("In seedkeeper_export_secret_to_satochip")
+
+        # Initialise self.parser.authentikey if not done already (If it is none, this function will crash)
+        if self.parser.authentikey is None:
+            self.card_bip32_get_authentikey()
+        
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA8
+        p1= 0x00
+        p2= 0x00
+        
+        data= [(sid>>8)%256, sid%256]
+        data+=[(sid_pubkey>>8)%256, sid_pubkey%256]
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x9c and sw2==0x31):
+            logger.warning("Export failed: export not allowed by SeedKeeper policy.")
+            raise SeedKeeperError("Export failed: export not allowed by SeedKeeper policy.")
+        elif (sw1==0x9c and sw2==0x08):
+            logger.warning("Export failed: secret not found")
+            raise SeedKeeperError("Export failed: secret not found")
+        elif (sw1 == 0x9c and sw2 == 0x0f):
+            raise SeedKeeperError("Export failed: invalid parameter")
+        else:
+            logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+        #TODO add more SW support
+
+        response_offset= 0
+        # parse header
+        secret_dict= self.parser.parse_seedkeeper_header(response[response_offset:(response_offset+2+13)])
+        response_offset+=15
+        # iv
+        iv=  response[response_offset:(response_offset+16)] #todo: parse also in parse_seedkeeper_header()?
+        response_offset+=16
+        logger.debug("IV:"+ bytes(iv).hex())
+        secret_dict['iv_list']=iv
+        secret_dict['iv']= bytes(iv).hex()
+        
+        # secret_size
+        secret_size = 256*response[response_offset] + response[response_offset+1]
+        response_offset+=2
+
+        # secret
+        secret = response[response_offset:(response_offset+secret_size)]
+        response_offset+=secret_size
+        secret_dict['secret_list']= secret
+        secret_dict['secret_encrypted']= bytes(secret).hex()
+        
+        # hmac
+        sign_size=  256*response[response_offset] + response[response_offset+1]
+        response_offset+=2      
+        sign= response[response_offset:(response_offset+sign_size)]
+        secret_dict['hmac_list']=sign
+        secret_dict['hmac']=bytes(sign).hex()
+
+        full_data=secret_dict['header_list']+secret
+        secret_dict['full_data_list']= full_data
+        secret_dict['full_data']= bytes(full_data).hex()
+        
         return secret_dict
     
     def seedkeeper_list_secret_headers(self):
