@@ -1628,7 +1628,52 @@ class CardConnector:
     #################################
     #           SEEDKEEPER          #        
     #################################                               
+
+    def seedkeeper_get_status(self):
+        """Return status info specific to SeedKeeper"""
+        logger.debug("In seedkeeper_get_status")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0xA7
+        p1= 0x00
+        p2= 0x00
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
         
+        if (sw1==0x90 and sw2==0x00):
+            pass
+        elif (sw1==0x00 and sw2==0x00):
+            logger.error(f"Error while fetching SeedKeeper status: no card present (code 0x0000)")
+            raise CardNotPresentError(f"Error while fetching SeedKeeper status: no card present (code 0x0000)")
+        elif (sw1==0x9c and sw2==0x04):
+            logger.error(f"Error while fetching SeedKeeper status: setup not done (code 0x9C04)")
+            raise CardSetupNotDoneError(f"Error while fetching SeedKeeper status: setup not done (code 0x9C04)")
+        else: 
+            logger.error(f"Error while fetching SeedKeeper status: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error while fetching SeedKeeper status: (error code {hex(256*sw1+sw2)})")
+        
+        offset=0
+        seedKeeper_status={}
+        # memory
+        nb_secrets = 256*response[offset] + response[offset+1]
+        offset+=2
+        total_memory = 256*response[offset] + response[offset+1]
+        offset+=2
+        free_memory = 256*response[offset] + response[offset+1]
+        # logs
+        offset+=2
+        nb_logs_total = 256*response[offset] + response[offset+1]
+        offset+=2
+        nb_logs_avail = 256*response[offset] + response[offset+1]
+        offset+=2
+        last_log = response[offset:(offset+7)]
+        seedKeeper_status['nb_secrets']= nb_secrets
+        seedKeeper_status['total_memory']= total_memory
+        seedKeeper_status['free_memory']= free_memory
+        seedKeeper_status['nb_logs_total']= nb_logs_total
+        seedKeeper_status['nb_logs_avail']= nb_logs_avail
+        seedKeeper_status['last_log']= last_log
+        return (response, sw1, sw2, seedKeeper_status)
+
     def seedkeeper_generate_masterseed(self, seed_size, export_rights, label:str):
         logger.debug("In seedkeeper_generate_masterseed")
         cla= JCconstants.CardEdge_CLA
@@ -1797,7 +1842,15 @@ class CardConnector:
         logger.debug("In seedkeeper_import_secret")
         
         is_secure_import= False if (sid_pubkey is None) else True
-        
+        if (is_secure_import):
+            secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
+            padded_secret_size = len(secret_list) # encrypted_secret is already padded!
+        else:
+            secret_list= secret_dic['secret_list']
+            secret_size= len(secret_list)
+            pad_size = 16 - (secret_size)%16
+            padded_secret_size = secret_size + pad_size # padded_secret_size is size of encrypted secret (including padding)
+
         cla= JCconstants.CardEdge_CLA
         ins= 0xA1
         p1= 0x02 if is_secure_import else 0x01
@@ -1806,11 +1859,14 @@ class CardConnector:
         p2= 0x01        
         header= list(bytes.fromhex(secret_dic['header'][4:])) 
         
-        #data= [secret_type, export_rights, rfu1, rfu2, label_size] + label_list + [(sid_pubkey>>8)%256, sid_pubkey%256] + iv
+        #data= [secret_type, export_rights, rfu1, rfu2, label_size] + label_list + [(sid_pubkey>>8)%256, sid_pubkey%256] + iv 
+        # for SeedKeeper v0.2
+        #data= [secret_type, export_rights, rfu1, rfu2, label_size] + label_list + [(sid_pubkey>>8)%256, sid_pubkey%256] + iv + padded_secret_size(2b)
         data=  header
         if (is_secure_import):
             iv= list(bytes.fromhex(secret_dic['iv']))
             data+= [(sid_pubkey>>8)%256, sid_pubkey%256] + iv
+        data+= [(padded_secret_size>>8)%256, (padded_secret_size%256)]
         lc=len(data)
         apdu=[cla, ins, p1, p2, lc]+data
         response, sw1, sw2 = self.card_transmit(apdu)
@@ -1821,10 +1877,10 @@ class CardConnector:
         # OP_PROCESS
         p2= 0x02
         chunk_size=128;
-        if (is_secure_import):
-            secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
-        else:
-            secret_list= secret_dic['secret_list']
+        # if (is_secure_import):
+        #     secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
+        # else:
+        #     secret_list= secret_dic['secret_list']
         secret_offset= 0
         secret_remaining= len(secret_list)
         while (secret_remaining>chunk_size):
@@ -1892,6 +1948,7 @@ class CardConnector:
         apdu=[cla, ins, p1, p2, lc]+data
         
         # initial call
+        logger.debug("in seedkeeper_export_secret: INIT")
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1==0x90 and sw2==0x00):
             pass
@@ -1924,8 +1981,21 @@ class CardConnector:
         p2= 0x02
         apdu=[cla, ins, p1, p2, lc]+data
         while(True):
-            
+            logger.debug("in seedkeeper_export_secret: UPDATE")
             response, sw1, sw2 = self.card_transmit(apdu)
+            if (sw1==0x90 and sw2==0x00):
+                pass
+            elif (sw1==0x9c and sw2==0x08):
+                logger.warning("Export failed: secret not found")
+                raise SeedKeeperError("Export failed: secret not found")
+            elif (sw1==0x9c and sw2==0x30):
+                logger.warning("Export failed: lock error - try again")
+                #TODO: try again?
+                raise SeedKeeperError("Export failed: lock error - try again")
+            else:
+                logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+                raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+
             # parse data
             response_size= len(response)
             chunk_size= (response[0]<<8)+response[1]
@@ -2098,7 +2168,7 @@ class CardConnector:
             
         return (logs, nbtotal_logs, nbavail_logs)
     
-    def make_header(self, secret_type, export_rights, label):
+    def make_header(self, secret_type, export_rights, label, subtype = 0x00):
         id=2*[0x00]
         if type(secret_type) is str:
             itype= dict_swap_keys_values(SEEDKEEPER_DIC_TYPE)[secret_type]
@@ -2111,7 +2181,7 @@ class CardConnector:
             export= export_rights
         export_counters=3*[0x00]
         fingerprint= 4*[0x00]
-        rfu=2*[0x00]
+        rfu= [subtype, 0x00]
         label_size= len(label)
         label_list= list(label.encode('utf8'))
         header_list= id + [itype, origin, export] + export_counters + fingerprint + rfu + [label_size] + label_list
@@ -2307,7 +2377,7 @@ class CardConnector:
         return True, txt_ca, txt_subca, txt_device, txt_error
     
     #################################
-    #                  SATODIME                   #
+    #            SATODIME           #
     #################################
     
     def satodime_set_unlock_secret(self, unlock_secret=[]):

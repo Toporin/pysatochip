@@ -607,7 +607,7 @@ class SeedKeeperTest(unittest.TestCase):
         secret_list= [len(seed_list)]+seed_list
 
         # make header
-        export_rights = (0x01 ^ 0x10) #('Plaintext export allowed' xor 'Plaintext usage allowed')
+        export_rights = 0x01 # 'Plaintext export allowed'
         stype = 'Masterseed'
         label = f"Test Masterseed BIP32 vector1"
         header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
@@ -674,7 +674,7 @@ class SeedKeeperTest(unittest.TestCase):
         secret_list= [len(seed_list)]+seed_list
 
         # make header
-        export_rights = (0x01 ^ 0x10) #('Plaintext export allowed' xor 'Plaintext usage allowed')
+        export_rights = 0x01 # 'Plaintext export allowed'
         stype = 'Masterseed'
         label = f"Test Masterseed BIP32 vector2"
         header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
@@ -739,7 +739,7 @@ class SeedKeeperTest(unittest.TestCase):
         secret_list= [len(seed_list)]+seed_list
 
         # make header
-        export_rights = (0x01 ^ 0x10) #('Plaintext export allowed' xor 'Plaintext usage allowed')
+        export_rights = 0x01 # 'Plaintext export allowed'
         stype = 'Masterseed'
         label = f"Test Masterseed BIP32 vector2"
         header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
@@ -796,7 +796,7 @@ class SeedKeeperTest(unittest.TestCase):
         path= "m/83696968'/39'/0'/12'/0'"
 
         # make header
-        export_rights = 0x01 ^ 0x10 #0x11 # 'Plaintext export allowed' and 'Plaintext usage allowed'
+        export_rights = 0x01 #'Plaintext export allowed'
         stype = 'BIP39 mnemonic v2'
         label = f"Test BIP85 with BIP39v2 {len(bip39.split())} words"
         header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
@@ -874,7 +874,137 @@ class SeedKeeperTest(unittest.TestCase):
         self.assertEqual(id1, 0xFFFF)
         self.assertEqual(id2, 0xFFFF)
         self.assertEqual(res & 0xFF00, 0x6300)
-        
+    
+    #@unittest.skip("debug")
+    def test_memory(self):
+
+        sids = []
+        secrets = []
+        fingerprints = []
+
+        secret_size= 1
+        while (True):
+            print(f"secret_size: {secret_size}")
+            secret_list = [(secret_size>>8)%256, (secret_size%256)] + list(urandom(secret_size)); 
+
+            # make header
+            export_rights = 0x01 #'Plaintext export allowed'
+            stype = 'Data'
+            label = f"Test Data with {secret_size}+2 bytes"
+            header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
+            #print(f"Label: {label}")
+
+            secret_dic={'header':header, 'secret_list':secret_list}
+            # import in plaintext
+            try:    
+                (sid, fingerprint)=  SeedKeeperTest.cc.seedkeeper_import_secret(secret_dic, sid_pubkey=None)
+                sids+=[sid]
+                secrets+= [secret_list]
+                fingerprints+= [fingerprint]
+
+                (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+                print(f"nb_secrets: {dic['nb_secrets']}")
+                print(f"total_memory: {dic['total_memory']}")
+                print(f"free_memory: {dic['free_memory']}")
+                print(f"nb_logs_total: {dic['nb_logs_total']}")
+                print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+                print(f"last_log: {dic['last_log']}")
+
+            except Exception as ex:
+                print(f"Exception during secret import: {ex}")
+                break
+
+            secret_size+=1
+
+        for index, sid in enumerate(sids):
+
+            # export secret
+            sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
+            self.assertEqual(sdict['id'], sid)
+            self.assertEqual(sdict['type'], 0xd0) # 'BIP39 mnemonic v2'
+            self.assertEqual(sdict['origin'], 0x01)
+            self.assertEqual(sdict['export_rights'], 0x01)
+            self.assertEqual(sdict['secret_list'], secrets[index]) 
+            self.assertEqual(sdict['fingerprint'], fingerprints[index]) 
+            
+            # destroy object
+            response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
+            self.assertEqual(dic["is_reset"], True) 
+
+            (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+            print(f"nb_secrets: {dic['nb_secrets']}")
+            print(f"total_memory: {dic['total_memory']}")
+            print(f"free_memory: {dic['free_memory']}")
+            print(f"nb_logs_total: {dic['nb_logs_total']}")
+            print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+            print(f"last_log: {dic['last_log']}")
+
+    #@unittest.skip("debug")
+    def test_memory_big_secrets(self):
+
+        sids = []
+        secrets = []
+        fingerprints = []
+
+        secret_size= 192
+        while (True):
+            print(f"secret_size: {secret_size}")
+            secret_list = [(secret_size>>8)%256, (secret_size%256)] + list(urandom(secret_size)); 
+
+            # make header
+            export_rights = 0x01 #'Plaintext export allowed'
+            stype = 'Data'
+            label = f"Test Data with {secret_size}+2 bytes"
+            header = SeedKeeperTest.cc.make_header(stype, export_rights, label)
+            #print(f"Label: {label}")
+
+            secret_dic={'header':header, 'secret_list':secret_list}
+            # import in plaintext
+            try:    
+                (sid, fingerprint)=  SeedKeeperTest.cc.seedkeeper_import_secret(secret_dic, sid_pubkey=None)
+                sids+=[sid]
+                secrets+= [secret_list]
+                fingerprints+= [fingerprint]
+
+                (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+                print(f"nb_secrets: {dic['nb_secrets']}")
+                print(f"total_memory: {dic['total_memory']}")
+                print(f"free_memory: {dic['free_memory']}")
+                print(f"nb_logs_total: {dic['nb_logs_total']}")
+                print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+                print(f"last_log: {dic['last_log']}")
+
+            except Exception as ex:
+                print(f"Exception during secret import: {ex}")
+                break
+
+            secret_size+=64
+
+        for index, sid in enumerate(sids):
+
+            # export secret
+            sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
+            self.assertEqual(sdict['id'], sid)
+            self.assertEqual(sdict['type'], 0xd0) # 'BIP39 mnemonic v2'
+            self.assertEqual(sdict['origin'], 0x01)
+            self.assertEqual(sdict['export_rights'], 0x01)
+            self.assertEqual(sdict['secret_list'], secrets[index]) 
+            self.assertEqual(sdict['fingerprint'], fingerprints[index]) 
+            
+            # destroy object
+            response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
+            self.assertEqual(dic["is_reset"], True) 
+
+            (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+            print(f"nb_secrets: {dic['nb_secrets']}")
+            print(f"total_memory: {dic['total_memory']}")
+            print(f"free_memory: {dic['free_memory']}")
+            print(f"nb_logs_total: {dic['nb_logs_total']}")
+            print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+            print(f"last_log: {dic['last_log']}")
+
+
+
     #TODO
 
     # try  to export non existent id

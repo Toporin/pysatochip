@@ -523,6 +523,7 @@ class CardDataParser:
         
         header_dict['id']= (response[0]<<8) +response[1]
         header_dict['type']= response[2]
+        header_dict['subtype']= response[12] # same as 'rfu1''
         header_dict['origin']= response[3]
         header_dict['export_rights']= response[4]
         header_dict['export_nbplain']=  response[5]

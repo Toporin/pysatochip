@@ -880,6 +880,30 @@ def common_reset_factory_new():
 
     return
 
+#################################
+#           SEEDKEEPER          #        
+#################################               
+
+@main.command()
+def seedkeeper_get_card_status():
+    """Return status info specific to SeedKeeper"""
+
+    # get PIN from environment variable or interactively
+    if 'PYSATOCHIP_PIN' in environ:
+        pin= environ.get('PYSATOCHIP_PIN')
+        print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+    else:
+        pin = getpass("Enter your PIN:")
+    cc.card_verify_PIN(pin)
+
+    response, sw1, sw2, dic = cc.seedkeeper_get_status()
+    print(f"nb_secrets: {dic['nb_secrets']}")
+    print(f"total_memory: {dic['total_memory']}")
+    print(f"free_memory: {dic['free_memory']}")
+    print(f"nb_logs_total: {dic['nb_logs_total']}")
+    print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+    print(f"last_log: {dic['last_log']}")
+
 
 @main.command()
 @click.option("--label", required=True, help="Label for the secret")
@@ -1002,11 +1026,12 @@ def seedkeeper_derive_master_password(salt, sid, pubkey_id):
 
 @main.command()
 @click.option("--type", required=True, help="Plaintext file with secret to import (Raw secret-dict)")
+@click.option("--subtype", type=int, default=0, help="Further specify type of secret, default = 0 (unspecified). To be detailed!")
 @click.option("--label", required=True, help="Label for the secret")
 @click.option("--export-rights", required=True, help="Export Rights for the secret")
 @click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
 @click.option("--wordlist", default="english", help="Define which worldlist (language) to use for BIP39 v2")
-def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlist):
+def seedkeeper_import_secret(type, subtype, label, export_rights, use_passphrase, wordlist):
     """Import a Secret into the Seedkeeper"""
 
     # get PIN from environment variable or interactively
@@ -1029,8 +1054,8 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
     # Swap underscores for spaces... Simplest solution to keep click happy and still use types directly from the dictionaries
     export_rights = export_rights.replace("_", " ")
     type = type.replace("_", " ")
-    header = cc.make_header(type, export_rights, label)
-
+    header = cc.make_header(type, export_rights, label, subtype= subtype)
+    
     # get secret and optionnaly passphrase
     secret = input("Enter your secret:")
     bip39_passphrase = "" # default
@@ -1053,7 +1078,9 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
         secret_list = [len(bip39_mnemonic_list)] + bip39_mnemonic_list + [
             len(bip39_passphrase_list)] + bip39_passphrase_list
 
-    elif type == 'BIP39 mnemonic v2':
+    #elif type == 'BIP39 mnemonic v2':
+    elif type == 'Masterseed' and subtype == 0x01: # Masterseed with BIP39 info
+        
         #todo check worldlist is supported
         wordlist_byte = dict_swap_keys_values(BIP39_WORDLIST_DIC).get(wordlist)
         if wordlist_byte == None:
@@ -1071,15 +1098,6 @@ def seedkeeper_import_secret(type, label, export_rights, use_passphrase, wordlis
             masterseed_list = list(masterseed_bytes)
         except Exception as e:
             exit(e)
-
-        # secret_list = ([wordlist_byte] + 
-        #                 [len(bip39_entropy_list)] + 
-        #                 bip39_entropy_list + 
-        #                 [len(bip39_passphrase_list)] + 
-        #                 bip39_passphrase_list +
-        #                 [len(masterseed_list)] + 
-        #                 masterseed_list
-        #                 )
 
         # this format is backward compatible with Masterseed, this facilitates encrypted export to satochip
         secret_list = ([len(masterseed_list)] + 
@@ -1161,8 +1179,8 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
         if export_dict:
             print(secret_dict)
         else:
-
             stype = SEEDKEEPER_DIC_TYPE.get(secret_dict['type'], hex(secret_dict['type']))  # hex(header['type'])
+            subtype = secret_dict['subtype']
             origin = SEEDKEEPER_DIC_ORIGIN.get(secret_dict['origin'], hex(secret_dict['origin']))  # hex(header['origin'])
             export_rights = SEEDKEEPER_DIC_EXPORT_RIGHTS.get(secret_dict['export_rights'],
                                                              hex(secret_dict['export_rights']))  # str(header['export_rights'])
@@ -1262,7 +1280,8 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
 
                 #     secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'  
 
-                elif stype == 'BIP39 mnemonic v2':
+                #elif stype == 'BIP39 mnemonic v2':
+                elif stype == 'Masterseed' and subtype==0x01:
                     # this format is backward compatible with Masterseed (BIP39 info appended after Masterseed)
                     # mnemonic in compressed format using entropy (16-32 bytes)
                     secret_raw_hex = secret_dict['secret']
