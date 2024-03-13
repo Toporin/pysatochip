@@ -19,6 +19,7 @@ import hmac
 import base64
 import logging
 from os import urandom
+from typing import Union
 
 #debug
 # import sys
@@ -200,6 +201,9 @@ class CardConnector:
         self.card_filter= card_filter # limit card_select to a subset of [satochip, seedkeeper, satodime]
         self.card_type= "card"
         self.cert_pem=None # PEM certificate of device, if any
+        # cach protocol version (version x.y => 256*x+y)
+        self.protocol_version = 0
+
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
         try:
@@ -386,6 +390,7 @@ class CardConnector:
             d["applet_major_version"]= response[2]
             d["applet_minor_version"]= response[3]
             d["protocol_version"]= (d["protocol_major_version"]<<8)+d["protocol_minor_version"] 
+            self.protocol_version= d["protocol_version"] #cache version
             # PIN/PUK status
             if len(response) >=8:
                 d["PIN0_remaining_tries"]= response[4]
@@ -1733,7 +1738,7 @@ class CardConnector:
             
         return (response, sw1, sw2, id, fingerprint)
     
-    def seedkeeper_generate_random_secret(self, type:int, subtype:int, size:int, export_rights:int, label:str, save_entropy:int, entropy:str):
+    def seedkeeper_generate_random_secret(self, stype:int, subtype:int, size:int, export_rights:int, label:str, save_entropy:int, entropy: Union[str, bytes]):
         logger.debug("In seedkeeper_generate_random_secret")
         
         if (size<16 or size>64):
@@ -1747,12 +1752,16 @@ class CardConnector:
         p1= size
         p2= export_rights
         
-        label= list(label.encode('utf-8'))
-        label_size= len(label)
-        entropy= list(entropy.encode('utf-8'))
-        entropy_size= len(entropy)
+        label_list= list(label.encode('utf-8'))
+        label_size= len(label_list)
 
-        data= [type, subtype, save_entropy] + [label_size]+label + [entropy_size] + entropy
+        if type(entropy) == str:
+            entropy_list = list(entropy.encode('utf-8'))
+        elif type(entropy) == bytes:
+            entropy_list = list(entropy)
+        entropy_size= len(entropy_list)
+
+        data= [stype, subtype, save_entropy] + [label_size]+label_list + [entropy_size] + entropy_list
         
         lc= len(data)
         apdu=[cla, ins, p1, p2, lc]+data
@@ -1776,6 +1785,8 @@ class CardConnector:
                 dic['fingerprint_entropy']= fingerprint2
         else:
             logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            dic['id']= None
+            dic['fingerprint']= None
             
         return (response, sw1, sw2, dic)
 
