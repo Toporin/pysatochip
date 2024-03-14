@@ -50,14 +50,16 @@ SEEDKEEPER_LOG_INS_DIC = {
     0x46: 'Unblock PIN',
     0x6D: 'Get BIP32 extended key',
     0xA0: 'Generate masterseed', 
-    0xA5: 'Reset secret', 
-    0xAE: 'Generate 2FA Secret',
     0xA1: 'Import secret', 
     0xA1A: 'Import plain secret', 
     0xA1B: 'Import encrypted secret',
     0xA2: 'Export secret', 
     0xA2A: 'Export plain secret', 
     0xA2B: 'Export encrypted secret',
+    0xA3: 'Generate random secret',
+    0xA5: 'Reset secret', 
+    0xA8: 'Export secret to Satochip',
+    0xAE: 'Generate 2FA Secret',
     0xAA: 'Derive Master Password',
     0xFF: 'RESET TO FACTORY'
 }

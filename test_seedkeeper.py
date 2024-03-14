@@ -27,6 +27,7 @@ import string
 import hashlib
 import hmac
 import random
+from random import randrange
 from os import urandom
 
 from mnemonic import Mnemonic
@@ -180,6 +181,8 @@ class SeedKeeperTest(unittest.TestCase):
                 # test delete
                 response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
                 self.assertEqual(dic["is_reset"], True)
+            else:
+                print(f"SeedKeeper v0.1: delete secret not supported!")
 
     #@unittest.skip("debug")
     def test_generate_2FA_secret(self):
@@ -228,6 +231,8 @@ class SeedKeeperTest(unittest.TestCase):
             # test delete
             response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
             self.assertEqual(dic["is_reset"], True)
+        else:
+            print(f"SeedKeeper v0.1: delete secret not supported!")
     
     #@unittest.skip("debug")
     def test_import_export_secret_plain(self):
@@ -286,7 +291,9 @@ class SeedKeeperTest(unittest.TestCase):
             if SeedKeeperTest.v_applet>=2:
                 # test delete
                 response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
-                self.assertEqual(dic["is_reset"], True) 
+                self.assertEqual(dic["is_reset"], True)
+            else:
+                print(f"SeedKeeper v0.1: delete secret not supported!")
 
     #@unittest.skip("debug")
     def test_import_export_secret_encrypted(self):
@@ -394,18 +401,23 @@ class SeedKeeperTest(unittest.TestCase):
                 self.assertEqual(dic["is_reset"], True) 
                 # test delete reimported key
                 response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid2)
-                self.assertEqual(dic["is_reset"], True) 
+                self.assertEqual(dic["is_reset"], True)
+            else:
+                print(f"SeedKeeper v0.1: delete secret not supported!")
 
         if SeedKeeperTest.v_applet>=2:
             # test delete imported authentikey
             response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid_authentikey)
-            self.assertEqual(dic["is_reset"], True) 
+            self.assertEqual(dic["is_reset"], True)
+        else:
+            print(f"SeedKeeper v0.1: delete secret not supported!")
 
     #@unittest.skip("debug")
     def test_BIP39_mnemonic_v2(self):
         
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: Masterseed with BIP39 not supported!")
             return
 
         wordlist = "english"
@@ -505,12 +517,15 @@ class SeedKeeperTest(unittest.TestCase):
                 self.assertEqual(id1, sid)
                 self.assertEqual(id2, 0xFFFF)
                 self.assertEqual(res, 0x9000)
+            else:
+                print(f"SeedKeeper v0.1: delete secret not supported!")
 
     #@unittest.skip("debug")
     def test_generate_random_secret(self):
 
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: generate random_secret with external entropy not supported!")
             return
 
         pw_sizes = [16, 32, 48, 64]
@@ -518,10 +533,10 @@ class SeedKeeperTest(unittest.TestCase):
 
             stype = 0x91 # Master Password
             export_rights = 0x01 # Plaintext export allowed
-            subtype = index #0x00 # default
+            subtype = 0x00 # default
             label = f"Test MasterPassword Size:{size}"
 
-            # random entropy
+            # random entropy as ascii text
             entropy = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(size))
             #print(f"Entropy: {entropy}")
 
@@ -560,7 +575,7 @@ class SeedKeeperTest(unittest.TestCase):
             self.assertEqual(sdict_entropy['origin'], 0x03)
             self.assertEqual(sdict_entropy['export_rights'], export_rights)
             self.assertEqual(sdict_entropy['fingerprint'], fingerprint_entropy) 
-            self.assertEqual(sdict_entropy['rfu1'], 0x00) # todo
+            self.assertEqual(sdict_entropy['rfu1'], 0x10) # subtype 0x10 for entropy
             self.assertEqual(sdict_entropy['rfu2'], 0x00) 
             self.assertEqual(sdict_entropy['label'], "entropy") 
 
@@ -596,10 +611,10 @@ class SeedKeeperTest(unittest.TestCase):
     #@unittest.skip("debug")
     def test_card_bip32_get_extendedkey_seed_vector1(self):  
         # Bip32 test vectors 1 (https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#Test_Vectors)
-        print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector1:") #debugSatochip
         
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: BIP32 derivation not supported!")
             return
 
         seed_hex= "000102030405060708090a0b0c0d0e0f"
@@ -663,10 +678,10 @@ class SeedKeeperTest(unittest.TestCase):
 
     #@unittest.skip("debug")
     def test_card_bip32_get_extendedkey_seed_vector2(self):
-        print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector2:") #debugSatochip
         
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: BIP32 not supported!")
             return
 
         seed_hex= "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542"
@@ -728,10 +743,10 @@ class SeedKeeperTest(unittest.TestCase):
 
     #@unittest.skip("debug")
     def test_card_bip32_get_extendedkey_seed_vector3(self):
-        print("\n\n[test_CardConnector] test_card_bip32_get_extendedkey_seed_vector3:") #debugSatochip
         
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: BIP32 derivation not supported!")
             return
 
         seed_hex= "4b381541583be4423346c643850da4b320e46a87ae3d2a4e6da11eba819cd4acba45d239319ac14f863b8d5ab5a0d0c64d2e8a1e7d1457df2e5a3c51c73235be"
@@ -782,6 +797,7 @@ class SeedKeeperTest(unittest.TestCase):
 
         # introduced in SeedKeeper v0.2
         if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: BIP32 derivation not supported!")
             return
 
         # vectors generated using https://iancoleman.io/bip39/#english
@@ -878,6 +894,12 @@ class SeedKeeperTest(unittest.TestCase):
     #@unittest.skip("debug")
     def test_memory(self):
 
+        # this test will fill all the card available memory
+        # Secret deletion introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: delete secret not supported!")
+            return
+
         sids = []
         secrets = []
         fingerprints = []
@@ -942,6 +964,12 @@ class SeedKeeperTest(unittest.TestCase):
     #@unittest.skip("debug")
     def test_memory_big_secrets(self):
 
+        # this test will fill all the card available memory
+        # Secret deletion introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: delete secret not supported!")
+            return
+
         sids = []
         secrets = []
         fingerprints = []
@@ -1003,6 +1031,83 @@ class SeedKeeperTest(unittest.TestCase):
             print(f"nb_logs_avail: {dic['nb_logs_avail']}")
             print(f"last_log: {dic['last_log']}")
 
+    #@unittest.skip("debug")
+    def test_memory_passwords(self):
+
+        # this test will fill all the card available memory
+        # Secret deletion introduced in SeedKeeper v0.2
+        if SeedKeeperTest.v_applet==1:
+            print(f"SeedKeeper v0.1: delete secret not supported!")
+            return
+
+        sids = []
+        secrets = []
+        urls = []
+        logins = []
+        fingerprints = []
+
+        
+        while (True):
+            # variable size
+            secret_size= randrange(10,16)
+            # random ascii login
+            login_str = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(secret_size))
+            login_bytes = login_str.encode('utf-8')
+            url_str = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(secret_size))
+            url_bytes = url_str.encode('utf-8')
+            secret_list = [(secret_size%256)] + list(urandom(secret_size)) + [len(login_bytes)] + list(login_bytes) + [len(url_bytes)] + list(url_bytes)
+
+            # make header
+            export_rights = 0x01 #'Plaintext export allowed'
+            stype = 'Password'
+            label = f"Test password with {secret_size} bytes"
+            header = SeedKeeperTest.cc.make_header(stype, export_rights, label, subtype=0x01)
+            #print(f"Label: {label}")
+
+            secret_dic={'header':header, 'secret_list':secret_list}
+            # import in plaintext
+            try:    
+                (sid, fingerprint)=  SeedKeeperTest.cc.seedkeeper_import_secret(secret_dic, sid_pubkey=None)
+                sids+=[sid]
+                secrets+= [secret_list]
+                urls += [url_str]
+                logins += [login_str]
+                fingerprints+= [fingerprint]
+
+                (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+                print(f"nb_secrets: {dic['nb_secrets']}")
+                print(f"total_memory: {dic['total_memory']}")
+                print(f"free_memory: {dic['free_memory']}")
+                print(f"nb_logs_total: {dic['nb_logs_total']}")
+                print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+                print(f"last_log: {dic['last_log']}")
+
+            except Exception as ex:
+                print(f"Exception during secret import: {ex}")
+                break
+
+        for index, sid in enumerate(sids):
+
+            # export secret
+            sdict= SeedKeeperTest.cc.seedkeeper_export_secret(sid, sid_pubkey= None)
+            self.assertEqual(sdict['id'], sid)
+            self.assertEqual(sdict['type'], 0x90)
+            self.assertEqual(sdict['origin'], 0x01)
+            self.assertEqual(sdict['export_rights'], 0x01)
+            self.assertEqual(sdict['secret_list'], secrets[index]) 
+            self.assertEqual(sdict['fingerprint'], fingerprints[index]) 
+            
+            # destroy object
+            response, sw1, sw2, dic = SeedKeeperTest.cc.seedkeeper_reset_secret(sid)
+            self.assertEqual(dic["is_reset"], True) 
+
+            (response, sw1, sw2, dic) = SeedKeeperTest.cc.seedkeeper_get_status()
+            print(f"nb_secrets: {dic['nb_secrets']}")
+            print(f"total_memory: {dic['total_memory']}")
+            print(f"free_memory: {dic['free_memory']}")
+            print(f"nb_logs_total: {dic['nb_logs_total']}")
+            print(f"nb_logs_avail: {dic['nb_logs_avail']}")
+            print(f"last_log: {dic['last_log']}")
 
 
     #TODO
