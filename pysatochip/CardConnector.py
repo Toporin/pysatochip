@@ -178,41 +178,36 @@ class CardConnector:
 
     def card_transmit(self, plain_apdu):
         logger.debug("In card_transmit")
-        while(self.card_present):
-            try:
-                #encrypt apdu
-                ins= plain_apdu[1]
-                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                    apdu = self.card_encrypt_secure_channel(plain_apdu)
-                else:
-                    apdu= plain_apdu
-                    
-                # transmit apdu
-                (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
-                
-                # PIN authentication is required
-                if (sw1==0x9C) and (sw2==0x06):
-                    (response, sw1, sw2)= self.card_verify_PIN()
-                #decrypt response
-                elif (sw1==0x90) and (sw2==0x00):
-                    if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
-                        response= self.card_decrypt_secure_channel(response)
-                    return (response, sw1, sw2)
-                else:
-                    return (response, sw1, sw2)
-                
-            except Exception as exc:
-                logger.warning(f"Error during connection: {repr(exc)}")
-                traceback.print_exc() #debug
-                if self.client is not None:
-                    self.client.request('show_error',"Error during connection:"+repr(exc))
-                return ([], 0x00, 0x00)
         
-        # no card present
-        if self.client is not None:
-            self.client.request('show_error','No card found! Please insert card!')
-        return ([], 0x00, 0x00)
-        #TODO return errror or throw exception?
+        if not self.card_present:
+            raise CardNotPresentError
+
+        while(self.card_present):
+            
+            #encrypt apdu
+            ins= plain_apdu[1]
+            if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+                apdu = self.card_encrypt_secure_channel(plain_apdu)
+            else:
+                apdu= plain_apdu
+                
+            # transmit apdu
+            (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
+            
+            # PIN authentication is required
+            if (sw1==0x9C) and (sw2==0x06):
+                (response, sw1, sw2)= self.card_verify_PIN()
+            #decrypt response
+            elif (sw1==0x90) and (sw2==0x00):
+                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+                    response= self.card_decrypt_secure_channel(response)
+                return (response, sw1, sw2)
+            else:
+                return (response, sw1, sw2)
+
+        if not self.card_present:
+            raise CardNotPresentError
+
             
     def card_get_ATR(self):
         logger.debug('In card_get_ATR()')
@@ -362,6 +357,29 @@ class CardConnector:
         p2=0
         apdu=[cla, ins, p1, p2]
 
+
+        # check format
+        if type(pin0) == str:
+            pin0 = list(pin0.encode("utf-8"))
+        elif type(pin0) == bytes:
+            pin0 = list(pin0)
+
+        if type(ublk0) == str:
+            ublk0 = list(ublk0.encode("utf-8"))
+        elif type(ublk0) == bytes:
+            ublk0 = list(ublk0)
+
+        if type(pin1) == str:
+            pin1 = list(pin1.encode("utf-8"))
+        elif type(pin1) == bytes:
+            pin1 = list(pin1)
+
+        if type(ublk1) == str:
+            ublk1 = list(ublk1.encode("utf-8"))
+        elif type(ublk1) == bytes:
+            ublk1 = list(ublk1)
+
+
         # data=[pin_length(1) | pin |
         #       pin_tries0(1) | ublk_tries0(1) | pin0_length(1) | pin0 | ublk0_length(1) | ublk0 |
         #       pin_tries1(1) | ublk_tries1(1) | pin1_length(1) | pin1 | ublk1_length(1) | ublk1 |
@@ -394,7 +412,7 @@ class CardConnector:
         return (response, sw1, sw2)
 
     ###########################################
-    #                        BIP32 commands                      #
+    #             BIP32 commands              #
     ###########################################
 
     def card_bip32_import_seed(self, seed):
@@ -772,7 +790,7 @@ class CardConnector:
         return xpub
        
     ###########################################
-    #                      Signing commands                      #
+    #           Signing commands              #
     ###########################################
     
     def card_sign_message(self, keynbr, pubkey, message, hmac=b'', altcoin=None):
@@ -980,7 +998,7 @@ class CardConnector:
         return (response, sw1, sw2)
      
     ###########################################
-    #                         2FA commands                        #
+    #               2FA commands              #
     ###########################################
      
     def card_set_2FA_key(self, hmacsha160_key, amount_limit):
@@ -1148,7 +1166,7 @@ class CardConnector:
             return (msg_out)
 
     ###########################################
-    #                         PIN commands                        #
+    #              PIN commands               #
     ###########################################
     
     def card_create_PIN(self, pin_nbr, pin_tries, pin, ublk):
@@ -1164,19 +1182,78 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         return (response, sw1, sw2)
 
-    #deprecated but used for testcase
-    def card_verify_PIN_deprecated(self, pin_nbr, pin):
-        logger.debug("In card_verify_PIN_deprecated")
+
+    def card_verify_PIN_simple(self, pin = None):
+        ''' Verify card PIN. Use PIN code provided by user first, or cached PIN value if available.
+            Throws exceptions for different cases:
+            * CardNotPresentError if card is not inserted in reader
+            * PinRequiredError if no PIN code is available
+            * WrongPinError if PIN is wrong
+            * PinBlockedError if PIN is blocked after too many attempts
+            * UnexpectedSW12Error for other issues
+
+        '''
+        logger.debug("In card_verify_PIN")
+        
+        if not self.card_present:
+            raise CardNotPresentError('No card found! Please insert card!');
+
+        if pin is not None:
+            logger.debug("DEBUG In card_verify_PIN got pin from args!")
+            if type(pin)==str:
+                pin_0= list(pin.encode("utf-8"))
+            elif type(pin)==bytes:
+                pin_0= list(pin)
+            else:
+                raise PinRequiredError(f'PIN should be a String or Bytes, not {type(pin)}')
+        else: 
+            if self.pin is not None:
+                logger.debug("DEBUG In card_verify_PIN got pin from cache!")
+                # recover cached value
+                pin_0= self.pin
+            else:
+                raise PinRequiredError('Device cannot be unlocked without PIN code!')
+
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_VERIFY_PIN
-        p1= pin_nbr
-        p2= 0x00
-        lc= len(pin)
-        apdu=[cla, ins, p1, p2, lc] + pin
-        # send apdu
-        response, sw1, sw2 = self.card_transmit(apdu)
-        return (response, sw1, sw2)
+        apdu=[cla, ins, 0x00, 0x00, len(pin_0)] + pin_0
+        
+        if (self.needs_secure_channel):
+                apdu = self.card_encrypt_secure_channel(apdu)
+        response, sw1, sw2 = self.cardservice.connection.transmit(apdu)
+        
+        # correct PIN: cache PIN value
+        if sw1==0x90 and sw2==0x00: 
+            self.set_pin(0, pin_0) 
+            return (response, sw1, sw2)     
+        # wrong PIN, get remaining tries available (since v0.11)
+        elif sw1==0x63 and (sw2 & 0xc0)==0xc0:
+            logger.error("In card_verify_PIN wrong PIN!")
+            self.set_pin(0, None) #reset cached PIN value
+            logger.debug(f"DEBUG In card_verify_PIN reset cached pin: self.pin: {self.pin}")
+            pin_left= (sw2 & ~0xc0)
+            raise WrongPinError(f"Wrong PIN! {pin_left} tries remaining!", pin_left)
+        # wrong PIN (legacy before v0.11)    
+        elif sw1==0x9c and sw2==0x02:
+            logger.error("In card_verify_PIN wrong PIN!")
+            self.set_pin(0, None) #reset cached PIN value
+            logger.debug(f"DEBUG In card_verify_PIN reset cached pin: self.pin: {self.pin}")
+            (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
+            pin_left= d.get("PIN0_remaining_tries",-1)
+            raise WrongPinError(f"Wrong PIN! {pin_left} tries remaining!", pin_left)
+        # blocked PIN
+        elif sw1==0x9c and sw2==0x0c:
+            logger.error("In card_verify_PIN Blocked PIN!")
+            self.set_pin(0, None) #reset cached PIN value
+            msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
+            raise PinBlockedError(msg)
+        # any other edge case
+        else:
+            self.set_pin(0, None) #reset cached PIN value
+            msg = (f"Please check your card! Unexpected error (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(msg, sw1, sw2)  
 
+    # deprecated, use card_verify_PIN_simple() preferrably
     def card_verify_PIN(self):
         logger.debug("In card_verify_PIN")
         
@@ -1220,6 +1297,7 @@ class CardConnector:
                     self.client.request('show_error', msg)
             # blocked PIN
             elif sw1==0x9c and sw2==0x0c:
+                self.set_pin(0, None) #reset cached PIN value
                 msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
                 if self.client is not None:
                     self.client.request('show_error', msg)
@@ -1238,7 +1316,20 @@ class CardConnector:
         else:
             raise RuntimeError('No card found! Please insert card!')
         return
-            
+    
+    #deprecated but used for testcase
+    def card_verify_PIN_deprecated(self, pin_nbr, pin):
+        logger.debug("In card_verify_PIN_deprecated")
+        cla= JCconstants.CardEdge_CLA
+        ins= JCconstants.INS_VERIFY_PIN
+        p1= pin_nbr
+        p2= 0x00
+        lc= len(pin)
+        apdu=[cla, ins, p1, p2, lc] + pin
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        return (response, sw1, sw2)
+
     def set_pin(self, pin_nbr, pin):
         # pin should be a list of bytes 
         self.pin_nbr=pin_nbr
@@ -1256,7 +1347,7 @@ class CardConnector:
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         
-        # correct PIN: cache PIN value
+        # correct PIN: cache new PIN value
         if sw1==0x90 and sw2==0x00: 
             self.set_pin(pin_nbr, new_pin) 
         # wrong PIN, get remaining tries available (since v0.11)
@@ -1264,23 +1355,24 @@ class CardConnector:
             self.set_pin(pin_nbr, None) #reset cached PIN value
             pin_left= (sw2 & ~0xc0)
             msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-            if self.client is not None:
-                self.client.request('show_error', msg)
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise WrongPinError(msg, pin_left)
         # wrong PIN (legacy before v0.11)    
         elif sw1==0x9c and sw2==0x02: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
             (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
             pin_left= d.get("PIN0_remaining_tries",-1)
             msg = ("Wrong PIN! {} tries remaining!").format(pin_left)
-            if self.client is not None:
-                self.client.request('show_error', msg)
-            raise RuntimeError(msg)
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise WrongPinError(msg, pin_left)
         # blocked PIN
         elif sw1==0x9c and sw2==0x0c:
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
-            if self.client is not None:
-                self.client.request('show_error', msg)
-            raise RuntimeError(msg)
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise PinBlockedError(msg)
 	        
         return (response, sw1, sw2)      
 
@@ -1300,22 +1392,24 @@ class CardConnector:
             self.set_pin(pin_nbr, None) #reset cached PIN value
             pin_left= (sw2 & ~0xc0)
             msg = ("Wrong PUK! {} tries remaining!").format(pin_left)
-            if self.client is not None:
-                self.client.request('show_error', msg)
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise WrongPinError(msg, pin_left)
         # wrong PUK (legacy before v0.11)    
         elif sw1==0x9c and sw2==0x02: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
             (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
             pin_left= d.get("PUK0_remaining_tries",-1)
             msg = ("Wrong PUK! {} tries remaining!").format(pin_left)
-            if self.client is not None:
-                self.client.request('show_error', msg)
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise WrongPinError(msg, pin_left)
         # blocked PUK
         elif sw1==0x9c and sw2==0x0c:
-            msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
-            if self.client is not None:
-                self.client.request('show_error', msg)
-            raise RuntimeError(msg)
+            msg = (f"Too many failed attempts. Your device has been blocked! (error code {hex(256*sw1+sw2)})")
+            # if self.client is not None:
+            #     self.client.request('show_error', msg)
+            raise PinBlockedError(msg)
         
         return (response, sw1, sw2)
 
@@ -1333,7 +1427,7 @@ class CardConnector:
         return (response, sw1, sw2)
         
     ###########################################
-    #                         Secure Channel                        #
+    #              Secure Channel             #
     ###########################################
     
     def card_initiate_secure_channel(self):
@@ -1374,7 +1468,7 @@ class CardConnector:
             logger.debug(f"Plaintext C-APDU: {toHexString(apdu[0:5])}{(len(apdu)-5)*' *'}")
         else:
             logger.debug(f"Plaintext C-APDU: {toHexString(apdu)}")
-            
+
         (iv, ciphertext, mac)= self.sc.encrypt_secure_channel(bytes(apdu))
         data= list(iv) + [len(ciphertext)>>8, len(ciphertext)&0xff] + list(ciphertext) + [len(mac)>>8, len(mac)&0xff] + list(mac)
         lc= len(data)
@@ -1389,14 +1483,14 @@ class CardConnector:
         if len(response)==0:
             return response
         elif len(response)<18:
-            raise RuntimeError('Encrypted response has wrong lenght!')
+            raise SecureChannelError('Encrypted response has wrong length!')
         
         iv= bytes(response[0:16])
         size= ((response[16] & 0xff)<<8) + (response[17] & 0xff)
         ciphertext= bytes(response[18:])
         if len(ciphertext)!=size:
             logger.warning(f'In card_decrypt_secure_channel: ciphertext has wrong length: expected {str(size)} got {str(len(ciphertext))}')
-            raise RuntimeError('Ciphertext has wrong lenght!')
+            raise SecureChannelError('Ciphertext has wrong length!')
             
         plaintext= self.sc.decrypt_secure_channel(iv, ciphertext)
         
@@ -1406,7 +1500,7 @@ class CardConnector:
         return plaintext
         
     #################################
-    #                  SEEDKEEPER              #        
+    #           SEEDKEEPER          #        
     #################################                               
         
     def seedkeeper_generate_masterseed(self, seed_size, export_rights, label:str):
@@ -1760,7 +1854,7 @@ class CardConnector:
         return header_hex
     
     #################################
-    #                   PERSO PKI                 #        
+    #           PERSO PKI           #        
     #################################    
     def card_export_perso_pubkey(self):
         logger.debug("In card_export_perso_pubkey")
@@ -1853,7 +1947,7 @@ class CardConnector:
     
     
     #################################
-    #                     HELPERS                 #        
+    #             HELPERS           #        
     ################################# 
     
     #deprecated
@@ -1870,6 +1964,10 @@ class CardConnector:
         
         return pub_hex
 
+#################################
+#           EXCEPTIONS          #
+#################################
+
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""
     pass
@@ -1880,13 +1978,38 @@ class UninitializedSeedError(Exception):
 
 class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
-    pass
+    def __init__(self, message, sw1=0x00, sw2=0x00):            
+        # Call the base class constructor with the parameters it needs
+        super().__init__(message)
+        self.sw1 = sw1
+        self.sw2 = sw2
+        self.sw12hex = hex(sw1*256+sw2)
+
 class CardError(Exception):
     """Raised when the device returns an error code"""
     pass
 
+class PinRequiredError(Exception):
+    """Raised when the device needs a correct PIN to continue"""
+    pass
+
+class WrongPinError(Exception):
+    """Raised when the provided PIN code is wrong"""
+    def __init__(self, message, pin_left):            
+        # Call the base class constructor with the parameters it needs
+        super().__init__(message)
+        self.pin_left = pin_left
+
+class PinBlockedError(Exception):
+    """Raised when the card PIN is blocked"""
+    pass
+
 class CardNotPresentError(Exception):
     """Raised when the device returns an error code"""
+    pass
+
+class SecureChannelError(Exception):
+    """Raised for errors related to secure channel"""
     pass
 
 class SeedKeeperError(Exception):

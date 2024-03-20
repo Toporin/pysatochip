@@ -28,8 +28,9 @@ SEEDKEEPER_PROTOCOL_VERSION= (SEEDKEEPER_PROTOCOL_MAJOR_VERSION<<8)+SEEDKEEPER_P
 # v0.12.3: patch: downgrade pyscard version in requirements to solve conflicts
 # v0.12.4: Patch dependencies version & minor issue
 # v0.12.5: remove pyopenssl & pyaes dependencies
+# v0.12.6: refactor & simplify PIN verification with new method card_verify_PIN_simple()
 # TODO: include SeedKeeper & Satodime version
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 12
-PYSATOCHIP_REVISION= 5
+PYSATOCHIP_REVISION= 6
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

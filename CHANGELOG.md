@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.6]:
+
+### Changed 
+
+ - Refactor & simplify PIN verification with new method card_verify_PIN_simple(). State management when PIN verification fails (wrong PIN, card removed, Pin blocked...) is handled in the client app, not in pysatochip
+ - Remove some exception handling in card_transmit(), usually exceptions should be handled in calling method or in client app
+ - Get rid of most 'self.client.request()' callbacks, except for updating status when inserting/removing card physically
+ - Add more specific exceptions classes
+
 ## [0.12.5]:
 
 ### Changed 
