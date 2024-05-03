@@ -60,7 +60,7 @@ SEEDKEEPER_LOG_INS_DIC = {
     0xA5: 'Reset secret', 
     0xA8: 'Export secret to Satochip',
     0xAE: 'Generate 2FA Secret',
-    0xAA: 'Derive Master Password',
+    0xAF: 'Derive Master Password',
     0xFF: 'RESET TO FACTORY'
 }
 SEEDKEEPER_LOG_RES_DIC = {
@@ -81,7 +81,7 @@ SEEDKEEPER_LOG_RES_DIC = {
     0x9C31: 'Export not allowed',
     0x9C32: 'Import data too long', 
     0x9C33: 'Wrong MAC during import', 
-    0x9C35: 'Wrong Secret Type',
+    0x9C38: 'Wrong Secret Type',
     0x0000: 'Unexpected error'
 }
 

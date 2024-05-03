@@ -1799,7 +1799,7 @@ class CardConnector:
             raise RuntimeError("is_secure_export currently unsupported for seedkeeper_derive_master_password")
 
         cla= JCconstants.CardEdge_CLA
-        ins= 0xAA
+        ins= 0xAF
         p1= 0x02 if is_secure_export else 0x01
         p2= 0x00
         
