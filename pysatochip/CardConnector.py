@@ -228,7 +228,7 @@ class CardConnector:
             #try:
             #encrypt apdu
             ins= plain_apdu[1]
-            if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+            if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
                 apdu = self.card_encrypt_secure_channel(plain_apdu)
             else:
                 apdu= plain_apdu
