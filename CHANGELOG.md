@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1]:
+
+WIP!
+
+Add support for Seedkeeper v0.2:
+* add support for BIP85 derivation for Masterseed secrets stored in seedkeeper (v0.2 only)
+* add support for secret export to satochip using seedkeeper_export_secret_to_satochip()
+* add seedkeeper_generate_random_secret() + seedkeeper_derive_master_password() + BIP39 Mnemonic v2 
+* add NFC policy support (enable/disable/deactivate)
+* implement new Factory Reset mechanism for SeedKeeper v0.2
+* add support for secret reset
+* Update test suite for seedkeeper
+
+CLI:
+* add support to get PIN data from environment variable 'PYSATOCHIP_PIN' when available
+
 ## [0.14.3]:
 
  - Add CLI to access module functionality (Including code from Seedkeeper & satodime tools)
