@@ -26,6 +26,12 @@ Factory reset:
 * Add card_swich_to_factory_observer() & card_switch_to_main_observer() in CardConnector to switch between the two observers type.
 * Add card_factory_disconnect() specific for factory reset
 
+Porting simplified PIN method from Pysatochip v0.12.6:
+* Refactor & simplify PIN verification with new method card_verify_PIN_simple(). 
+* State management when PIN verification fails (wrong PIN, card removed, Pin blocked...) is handled in the client app, not in pysatochip
+* Remove some exception handling in card_transmit(), usually exceptions should be handled in calling method or in client app
+* Get rid of most 'self.client.request()' callbacks, except for updating status when inserting/removing card physically
+* Add more specific exceptions classes
 
 ## [0.14.3]:
 
