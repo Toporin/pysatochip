@@ -155,7 +155,61 @@ class RemovalObserver(CardObserver):
         for card in removedcards:
             logger.info(f"-Removed: {toHexString(card.atr)}")
             self.cc.card_disconnect()
-                
+
+# a simplified card observer that detects inserted/removed cards, used to reset a card to factory state
+# Required as during factory reset, no APDU command other than reset-to-factory command can be send to card
+# compared to normal RemovalObserver: no card_get_status() & no card_initiate_secure_channel()
+class FactoryRemovalObserver(CardObserver):
+    def __init__(self, cc):
+        try:
+            self.cc = cc
+            logger.info("FactoryRemovalObserver initialized successfully")
+        except Exception as e:
+            logger.error(f"An error occurred in __init__: {e}", exc_info=True)
+
+    def update(self, observable, actions):
+        try:
+            logger.info("Update method called")
+            (addedcards, removedcards) = actions
+            logger.info(f"Actions received - Added cards: {len(addedcards)}, Removed cards: {len(removedcards)}")
+
+            for card in addedcards:
+                try:
+                    logger.info(f"+Inserted: {toHexString(card.atr)}")
+                    self.cc.client.request('card_inserted', card.atr)
+                    self.cc.card_event = "card_added"
+                    self.cc.card_connected = True
+                    self.cc.card_present = True
+                    self.cc.cardservice = card
+                    self.cc.cardservice.connection = card.createConnection()
+                    self.cc.cardservice.connection.connect()
+                    logger.info("Card connected successfully")
+
+                    (response, sw1, sw2) = self.cc.card_select()
+                    logger.info(f"Card select response: {response}, SW1: {sw1}, SW2: {sw2}")
+                    if sw1 != 0x90 or sw2 != 0x00:
+                        logger.warning("Card select failed, disconnecting card")
+                        self.cc.card_factory_disconnect()
+                        # self.cc.card_disconnect()
+                        break
+                except Exception as exc:
+                    logger.warning(f"Error during connection: {repr(exc)}")
+                    self.cc.card_factory_disconnect()
+                    #self.cc.card_disconnect()
+
+            for card in removedcards:
+                try:
+                    logger.info(f"-Removed: {toHexString(card.atr)}")
+                    self.cc.client.request('card_removed', card.atr)
+                    self.cc.card_event = "card_removed"
+                    self.cc.card_factory_disconnect()
+                    #self.cc.card_disconnect()
+                    logger.info("Card disconnected successfully")
+                except Exception as exc:
+                    logger.warning(f"Error during card removal: {repr(exc)}")
+        except Exception as e:
+            logger.error(f"An error occurred in update: {e}", exc_info=True)
+             
 
 class CardConnector:
 
@@ -217,9 +271,27 @@ class CardConnector:
         self.cardmonitor = CardMonitor()
         self.cardobserver = RemovalObserver(self)
         self.cardmonitor.addObserver(self.cardobserver)
-     
+
+    def card_swich_to_factory_observer(self):
+        try:
+            self.cardmonitor.deleteObserver(self.cardobserver)
+            self.cardobserver = FactoryRemovalObserver(self)
+            self.cardmonitor.addObserver(self.cardobserver)
+            logger.info("Switched to FactoryRemovalObserver successfully.")
+        except Exception as e:
+            logger.error(f"An error occurred while switching to FactoryRemovalObserver: {e}")
+
+    def card_switch_to_main_observer(self):
+        try:
+            self.cardmonitor.deleteObserver(self.cardobserver)
+            self.cardobserver = RemovalObserver(self)
+            self.cardmonitor.addObserver(self.cardobserver)
+            logger.info("Switched to RemovalObserver successfully.")
+        except Exception as e:
+            logger.error(f"An error occurred while switching to RemovalObserver: {e}")
+
     ###########################################
-    #                   Applet management                        #
+    #             Applet management           #
     ###########################################
 
     def card_transmit(self, plain_apdu):
@@ -324,8 +396,26 @@ class CardConnector:
         self.parser.authentikey=None
         self.parser.authentikey_coordx= None
         self.parser.authentikey_from_storage=None
-        
-        
+    
+    # specific for factory reset (todo: remove?)
+    def card_factory_disconnect(self):
+        logger.debug('In card_disconnect()')
+        self.pin= None #reset PIN
+        self.pin_nbr= None
+        self.is_seeded= None
+        self.needs_2FA = None
+        self.setup_done= None
+        self.needs_secure_channel= None
+        self.card_present= False
+        self.card_type= "card"
+        if self.cardservice:
+            self.cardservice.connection.disconnect()
+            self.cardservice= None
+        # reset authentikey
+        self.parser.authentikey=None
+        self.parser.authentikey_coordx= None
+        self.parser.authentikey_from_storage=None 
+
     def get_sw12(self, sw1, sw2):
         return 16*sw1+sw2
 
@@ -432,7 +522,7 @@ class CardConnector:
         return (response, sw1, sw2, d)
     
     ###########################################
-    #                Generic applet methods                     #
+    #         Generic applet methods          #
     ###########################################
     
     def card_get_label(self):
@@ -1183,7 +1273,7 @@ class CardConnector:
         return (response, sw1, sw2)
      
     ###########################################
-    #                         2FA commands                        #
+    #              2FA commands               #
     ###########################################
      
     def card_set_2FA_key(self, hmacsha160_key, amount_limit=0):
@@ -2735,7 +2825,7 @@ class CardConnector:
         return (response, sw1, sw2)
     
     #################################
-    #                     HELPERS                 #        
+    #            HELPERS            #        
     ################################# 
     
     #deprecated: since satochip applet v0.12, authentikey is generated once at initialization and does not derive from the seed

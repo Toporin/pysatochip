@@ -21,6 +21,12 @@ Add support for Seedkeeper v0.2:
 CLI:
 * add support to get PIN data from environment variable 'PYSATOCHIP_PIN' when available
 
+Factory reset:
+* Add class FactoryRemovalObserver(CardObserver): a simplified card observer that detects inserted/removed cards, used to reset a card to factory state. This is required as during factory reset, no APDU command other than reset-to-factory command can be send to card. Compared to normal RemovalObserver: no card_get_status() & no card_initiate_secure_channel() command are sent.
+* Add card_swich_to_factory_observer() & card_switch_to_main_observer() in CardConnector to switch between the two observers type.
+* Add card_factory_disconnect() specific for factory reset
+
+
 ## [0.14.3]:
 
  - Add CLI to access module functionality (Including code from Seedkeeper & satodime tools)
