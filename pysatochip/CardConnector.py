@@ -136,13 +136,17 @@ class RemovalObserver(CardObserver):
                 if sw1!=0x90 or sw2!=0x00:
                     self.cc.card_disconnect()
                     break
-                (response, sw1, sw2, status)= self.cc.card_get_status()
-                if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
-                    self.cc.card_disconnect()
-                    break
-                if (self.cc.needs_secure_channel):
-                    self.cc.card_initiate_secure_channel()
+
+                # During factory reset, we should not send othe cammands than reset...
+                if self.cc.mode_factory_reset == False:
+                    (response, sw1, sw2, status)= self.cc.card_get_status()
+                    if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
+                        self.cc.card_disconnect()
+                        break
+                    if (self.cc.needs_secure_channel):
+                        self.cc.card_initiate_secure_channel()
                 
+                # todo: skip or not for reset_factory?
                 if self.cc.client is not None:
                     self.cc.client.request('update_status',True)   
                 
@@ -156,6 +160,7 @@ class RemovalObserver(CardObserver):
             logger.info(f"-Removed: {toHexString(card.atr)}")
             self.cc.card_disconnect()
 
+# todo: deprecate?
 # a simplified card observer that detects inserted/removed cards, used to reset a card to factory state
 # Required as during factory reset, no APDU command other than reset-to-factory command can be send to card
 # compared to normal RemovalObserver: no card_get_status() & no card_initiate_secure_channel()
@@ -233,6 +238,7 @@ class CardConnector:
         self.is_seeded= None
         self.setup_done= None
         self.needs_secure_channel= None
+        self.mode_factory_reset = False # set to True when performing factory reset
         self.sc = None
         # cache PIN
         self.pin_nbr=None
@@ -262,7 +268,12 @@ class CardConnector:
         self.cardobserver = RemovalObserver(self)
         self.cardmonitor.addObserver(self.cardobserver)
 
-    def card_swich_to_factory_observer(self):
+    def set_mode_factory_reset(self, mode_factory_reset):
+        # WARNING: setting mode_factory_reset to True allows to reset the card to default!
+        self.mode_factory_reset = mode_factory_reset
+
+    # todo: deprecate?
+    def card_switch_to_factory_observer(self):
         try:
             self.cardmonitor.deleteObserver(self.cardobserver)
             self.cardobserver = FactoryRemovalObserver(self)
@@ -271,6 +282,7 @@ class CardConnector:
         except Exception as e:
             logger.error(f"An error occurred while switching to FactoryRemovalObserver: {e}")
 
+    # todo: deprecate?
     def card_switch_to_main_observer(self):
         try:
             self.cardmonitor.deleteObserver(self.cardobserver)
@@ -304,7 +316,7 @@ class CardConnector:
                 (response, sw1, sw2)= self.card_verify_PIN_simple()
             #decrypt response
             elif (sw1==0x90) and (sw2==0x00):
-                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
                     response= self.card_decrypt_secure_channel(response)
                 return (response, sw1, sw2)
             else:
@@ -370,7 +382,8 @@ class CardConnector:
         self.parser.authentikey_coordx= None
         self.parser.authentikey_from_storage=None
     
-    # specific for factory reset (todo: remove?)
+    # specific for factory reset 
+    # todo: deprecate?
     def card_factory_disconnect(self):
         logger.debug('In card_disconnect()')
         self.pin= None #reset PIN
