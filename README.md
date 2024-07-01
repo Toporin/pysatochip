@@ -14,12 +14,37 @@ This software is provided 'as-is', without any express or implied warranty. In n
 
 Remark: Pysatochip uses Python 3.x. In case of error, check first that you are not trying to run with Python 2.x or with Python 2.x libraries.
 
-    
 ### Satochip 2-Factor-Authentication (2FA)
 
 Satochip-2FA is an optional feature that allows to use 2-Factor-Authentication in conjonction with the Satochip hardware wallet. When enabled, transaction requests are sent to an app on a second device for approval before signing them with the Satochip. For security, once enabled, the 2FA can only be disabled when the seed is reset. Be sure to keep a copy of the 2FA key in a safe location. 
 
 ​When enabled, a secret key is shared via a qr-code between the satochip and a second device (currently, only Android). The app then regularly polls the Electrum server for new transaction proposals. These transaction candidates are then parsed and displayed on the second device. If approved, a cryptographic code is sent back to securely and uniquely approve the transaction so that the satochip can sign it.
+
+## Installing this Module
+
+This module is available for download on PyPy with the command `pip3 install pysatochip`.
+
+You can install this module on your system with the command `python setup.py install`.
+
+To use the Command Line Interface, you need to install additional dependencies, use this command instead: `pip install "pysatochip[CLI]"` or `pip install -e ".[CLI]"` (local install). 
+
+
+## Command Line Interface
+Once you have installed the module, you can access its functionality through a command line client `satochip-cli` 
+
+There are a wide range of available commands, each with their own relevant options. The best way to find these is with the `--help` argument. (`satochip-cli --help`)
+
+_There are also some general tools, such as those required to decrypt encrypted Seedkeeper JSON backups. (These can be accessed either standalone or via the module)_
+
+## Running from Source
+
+If you don't want to install the pysatochip module, you can also run a number of tools direcly from the repository folder.
+
+**Command Line Tool:** `python satochip_cli.py`
+
+**SatoChip Hardware Test** `python test_satochip.py`
+
+**SeedKeeper Hardware Test** `python test_seedkeeper.py`
 
 ## Development version (Windows)
 
@@ -50,6 +75,3 @@ Pyscard is required to connect to the smartcard::
     sudo apt-get install pcscd
     sudo apt-get install python3-pyscard
 (For alternatives, see https://github.com/LudovicRousseau/pyscard/blob/master/INSTALL.md for more detailed installation instructions)
-
-    
-

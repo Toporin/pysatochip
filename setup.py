@@ -1,11 +1,15 @@
 import setuptools
 import importlib.util
+import shutil, os
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
+
+# Copy satochip_cli into the module itself for packaging
+shutil.copyfile("satochip_cli.py", "pysatochip/satochip_cli.py")
 
 # load version.py; needlessly complicated alternative to "imp.load_source":
 version_spec = importlib.util.spec_from_file_location('version', 'pysatochip/version.py')
@@ -30,6 +34,9 @@ setuptools.setup(
         'Tracker': 'https://github.com/Toporin/pysatochip/issues',
     },
     install_requires=requirements,
+    extras_require={
+        "CLI": ["mnemonic", "click"],
+    },
     packages=setuptools.find_packages(),
     package_dir={
         'pysatochip': 'pysatochip'
@@ -37,7 +44,7 @@ setuptools.setup(
     package_data={
         'pysatochip': ['cert/*.cert'],
     },
-    
+    entry_points={"console_scripts": ["satochip-cli=pysatochip.satochip_cli:main"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",

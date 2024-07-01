@@ -1,8 +1,9 @@
+# Some elements originally from https://github.com/Electron-Cash/Electron-Cash/blob/master/lib/util.py
+# Some elements originally from https://github.com/Electron-Cash/Electron-Cash/blob/master/lib/bitcoin.py
+
 import hashlib
 import binascii
 from typing import Union, Tuple, Optional
-# from https://github.com/Electron-Cash/Electron-Cash/blob/master/lib/util.py
-# from https://github.com/Electron-Cash/Electron-Cash/blob/master/lib/bitcoin.py
 
 bfh = bytes.fromhex
 hfu = binascii.hexlify
@@ -126,3 +127,9 @@ def base_encode(v: bytes, *, base: int) -> str:
     result.extend([chars[0]] * nPad)
     result.reverse()
     return result.decode('ascii')
+
+def dict_swap_keys_values(dictionary):
+    return {value: key for key, value in dictionary.items()}
+
+def list_hyphenated_values(dictionary):
+    return [value.replace(" ", "_") for key, value in dictionary.items()]

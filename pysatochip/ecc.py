@@ -334,6 +334,7 @@ class ECPrivkey(ECPubkey):
         assert_bytes(privkey_bytes)
         if len(privkey_bytes) != 32:
             raise Exception('unexpected size for secret. should be 32 bytes, not {}'.format(len(privkey_bytes)))
+        self._privkey_bytes = privkey_bytes
         secret = string_to_number(privkey_bytes)
         if not is_secret_within_curve_range(secret):
             raise InvalidECPointException('Invalid secret scalar (not within curve order)')
@@ -363,6 +364,10 @@ class ECPrivkey(ECPubkey):
             raise Exception('invalid EC private key scalar: zero')
         privkey_32bytes = number_to_string(scalar, CURVE_ORDER)
         return privkey_32bytes
+
+    def get_private_key_bytes(self): 
+        return self._privkey_bytes
+
 
     def sign(self, data: bytes, sigencode=None, sigdecode=None) -> bytes:
         if sigencode is None:
