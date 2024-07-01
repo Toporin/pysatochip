@@ -544,6 +544,7 @@ class CardConnector:
         (response, sw1, sw2) = self.card_transmit(apdu)
         if (sw1==0x90) and (sw2== 0x00):
             self.set_pin(0, pin0) #cache PIN value
+            self.setup_done = True
             
             if self.card_type=='Satodime': # cache values 
                self.satodime_set_unlock_counter(response[0:SIZE_UNLOCK_COUNTER])
@@ -559,7 +560,7 @@ class CardConnector:
         if (sw1==0x90) and (sw2==0x00):
             logger.info("APDU reset transmitted successfully")
         else:
-            logger.info(f"Failed to transmit APDU reset with error code {hex(256*sw1+sw2)}")
+            logger.info(f"APDU reset transmitted with result code {hex(256*sw1+sw2)}")
         return response, sw1, sw2
 
 
@@ -598,14 +599,13 @@ class CardConnector:
             authentikey= self.card_bip32_set_authentikey_pubkey(response)
             authentikey_hex= authentikey.get_public_key_bytes(True).hex()
             logger.debug('[card_bip32_import_seed] authentikey_card= ' + authentikey_hex)
-            
-            # compute authentikey locally from seed 
+            self.is_seeded= True
+            # compute authentikey locally from seed (legacy before Satochip v0.12)
             # TODO: remove check if authentikey is not derived from seed
             #pub_hex= self.get_authentikey_from_masterseed(seed)
             # if (pub_hex != authentikey_hex):
                 # raise RuntimeError('Authentikey mismatch: local value differs from card value!')
                 
-            self.is_seeded= True
         elif (sw1==0x9C and sw2==0x17):
             logger.error(f"Error during secret import: card is already seeded (0x9C17)")
             raise CardError('Secure import failed: card is already seeded (0x9C17)!')
@@ -1473,6 +1473,10 @@ class CardConnector:
             self.set_pin(0, None) #reset cached PIN value
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             raise PinBlockedError(msg)
+        # card not setup
+        elif sw1==0x9c and sw2==0x04:
+            logger.error(f"In card_verify_PIN_simple setup not done (code 0x9C04)")
+            raise CardSetupNotDoneError(f"Failed to verify PIN: setup not done (code 0x9C04)")
         # any other edge case
         else:
             self.set_pin(0, None) #reset cached PIN value
@@ -1541,7 +1545,14 @@ class CardConnector:
                 msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
                 if self.client is not None:
                     self.client.request('show_error', msg)
-                raise IdentityBlockedError(msg) #RuntimeError(msg)
+                else:
+                    raise IdentityBlockedError(msg)
+            elif sw1==0x9c and sw2==0x04:
+                msg = "Failed to verify PIN: setup not done (code 0x9C04)"
+                if self.client is not None:
+                    self.client.request('show_error', msg)
+                else:
+                    raise CardSetupNotDoneError(msg)
             # any other edge case
             else:
                 self.set_pin(0, None) #reset cached PIN value
