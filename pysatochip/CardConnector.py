@@ -136,13 +136,17 @@ class RemovalObserver(CardObserver):
                 if sw1!=0x90 or sw2!=0x00:
                     self.cc.card_disconnect()
                     break
-                (response, sw1, sw2, status)= self.cc.card_get_status()
-                if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
-                    self.cc.card_disconnect()
-                    break
-                if (self.cc.needs_secure_channel):
-                    self.cc.card_initiate_secure_channel()
+
+                # During factory reset, we should not send other commands than reset...
+                if self.cc.mode_factory_reset == False:
+                    (response, sw1, sw2, status)= self.cc.card_get_status()
+                    if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
+                        self.cc.card_disconnect()
+                        break
+                    if (self.cc.needs_secure_channel):
+                        self.cc.card_initiate_secure_channel()
                 
+                # todo: skip or not for reset_factory?
                 if self.cc.client is not None:
                     self.cc.client.request('update_status',True)   
                 
@@ -155,60 +159,6 @@ class RemovalObserver(CardObserver):
         for card in removedcards:
             logger.info(f"-Removed: {toHexString(card.atr)}")
             self.cc.card_disconnect()
-
-# a simplified card observer that detects inserted/removed cards, used to reset a card to factory state
-# Required as during factory reset, no APDU command other than reset-to-factory command can be send to card
-# compared to normal RemovalObserver: no card_get_status() & no card_initiate_secure_channel()
-class FactoryRemovalObserver(CardObserver):
-    def __init__(self, cc):
-        try:
-            self.cc = cc
-            logger.info("FactoryRemovalObserver initialized successfully")
-        except Exception as e:
-            logger.error(f"An error occurred in __init__: {e}", exc_info=True)
-
-    def update(self, observable, actions):
-        try:
-            logger.info("Update method called")
-            (addedcards, removedcards) = actions
-            logger.info(f"Actions received - Added cards: {len(addedcards)}, Removed cards: {len(removedcards)}")
-
-            for card in addedcards:
-                try:
-                    logger.info(f"+Inserted: {toHexString(card.atr)}")
-                    self.cc.client.request('card_inserted', card.atr)
-                    self.cc.card_event = "card_added"
-                    self.cc.card_connected = True
-                    self.cc.card_present = True
-                    self.cc.cardservice = card
-                    self.cc.cardservice.connection = card.createConnection()
-                    self.cc.cardservice.connection.connect()
-                    logger.info("Card connected successfully")
-
-                    (response, sw1, sw2) = self.cc.card_select()
-                    logger.info(f"Card select response: {response}, SW1: {sw1}, SW2: {sw2}")
-                    if sw1 != 0x90 or sw2 != 0x00:
-                        logger.warning("Card select failed, disconnecting card")
-                        self.cc.card_factory_disconnect()
-                        # self.cc.card_disconnect()
-                        break
-                except Exception as exc:
-                    logger.warning(f"Error during connection: {repr(exc)}")
-                    self.cc.card_factory_disconnect()
-                    #self.cc.card_disconnect()
-
-            for card in removedcards:
-                try:
-                    logger.info(f"-Removed: {toHexString(card.atr)}")
-                    self.cc.client.request('card_removed', card.atr)
-                    self.cc.card_event = "card_removed"
-                    self.cc.card_factory_disconnect()
-                    #self.cc.card_disconnect()
-                    logger.info("Card disconnected successfully")
-                except Exception as exc:
-                    logger.warning(f"Error during card removal: {repr(exc)}")
-        except Exception as e:
-            logger.error(f"An error occurred in update: {e}", exc_info=True)
              
 
 class CardConnector:
@@ -233,6 +183,7 @@ class CardConnector:
         self.is_seeded= None
         self.setup_done= None
         self.needs_secure_channel= None
+        self.mode_factory_reset = False # set to True when performing factory reset
         self.sc = None
         # cache PIN
         self.pin_nbr=None
@@ -262,23 +213,10 @@ class CardConnector:
         self.cardobserver = RemovalObserver(self)
         self.cardmonitor.addObserver(self.cardobserver)
 
-    def card_swich_to_factory_observer(self):
-        try:
-            self.cardmonitor.deleteObserver(self.cardobserver)
-            self.cardobserver = FactoryRemovalObserver(self)
-            self.cardmonitor.addObserver(self.cardobserver)
-            logger.info("Switched to FactoryRemovalObserver successfully.")
-        except Exception as e:
-            logger.error(f"An error occurred while switching to FactoryRemovalObserver: {e}")
+    def set_mode_factory_reset(self, mode_factory_reset):
+        """ WARNING: setting mode_factory_reset to True allows to reset the card to factory and erase all data!"""
+        self.mode_factory_reset = mode_factory_reset
 
-    def card_switch_to_main_observer(self):
-        try:
-            self.cardmonitor.deleteObserver(self.cardobserver)
-            self.cardobserver = RemovalObserver(self)
-            self.cardmonitor.addObserver(self.cardobserver)
-            logger.info("Switched to RemovalObserver successfully.")
-        except Exception as e:
-            logger.error(f"An error occurred while switching to RemovalObserver: {e}")
 
     ###########################################
     #             Applet management           #
@@ -304,7 +242,7 @@ class CardConnector:
                 (response, sw1, sw2)= self.card_verify_PIN_simple()
             #decrypt response
             elif (sw1==0x90) and (sw2==0x00):
-                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, JCconstants.INS_GET_STATUS]):
+                if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
                     response= self.card_decrypt_secure_channel(response)
                 return (response, sw1, sw2)
             else:
@@ -369,25 +307,6 @@ class CardConnector:
         self.parser.authentikey=None
         self.parser.authentikey_coordx= None
         self.parser.authentikey_from_storage=None
-    
-    # specific for factory reset (todo: remove?)
-    def card_factory_disconnect(self):
-        logger.debug('In card_disconnect()')
-        self.pin= None #reset PIN
-        self.pin_nbr= None
-        self.is_seeded= None
-        self.needs_2FA = None
-        self.setup_done= None
-        self.needs_secure_channel= None
-        self.card_present= False
-        self.card_type= "card"
-        if self.cardservice:
-            self.cardservice.connection.disconnect()
-            self.cardservice= None
-        # reset authentikey
-        self.parser.authentikey=None
-        self.parser.authentikey_coordx= None
-        self.parser.authentikey_from_storage=None 
 
     def get_sw12(self, sw1, sw2):
         return 16*sw1+sw2
@@ -419,6 +338,8 @@ class CardConnector:
     def card_select_satochip(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
         (response, sw1, sw2) = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            raise CardSelectError("CardSelect error", ins=0xA4)
         self.card_type="Satochip"
         logger.debug("Found a Satochip!")
         return (response, sw1, sw2)
@@ -426,6 +347,8 @@ class CardConnector:
     def card_select_seedkeeper(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SEEDKEEPER_AID)] + CardConnector.SEEDKEEPER_AID
         (response, sw1, sw2) = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            raise CardSelectError("CardSelect error", ins=0xA4)
         self.card_type="SeedKeeper"
         logger.debug("Found a SeedKeeper!")
         return (response, sw1, sw2)
@@ -433,6 +356,8 @@ class CardConnector:
     def card_select_satodime(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SATODIME_AID)] + CardConnector.SATODIME_AID
         (response, sw1, sw2) = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            raise CardSelectError("CardSelect error", ins=0xA4)
         self.card_type="Satodime"
         logger.debug("Found a Satodime!")
         return (response, sw1, sw2)
@@ -619,6 +544,7 @@ class CardConnector:
         (response, sw1, sw2) = self.card_transmit(apdu)
         if (sw1==0x90) and (sw2== 0x00):
             self.set_pin(0, pin0) #cache PIN value
+            self.setup_done = True
             
             if self.card_type=='Satodime': # cache values 
                self.satodime_set_unlock_counter(response[0:SIZE_UNLOCK_COUNTER])
@@ -626,6 +552,17 @@ class CardConnector:
                self.is_owner= True
                     
         return (response, sw1, sw2)
+
+    def card_reset_factory_signal(self):
+        # transmit apdu
+        apdu = [0xB0, 0xFF, 0x00, 0x00, 0x00]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            logger.info("APDU reset transmitted successfully")
+        else:
+            logger.info(f"APDU reset transmitted with result code {hex(256*sw1+sw2)}")
+        return response, sw1, sw2
+
 
     ###########################################
     #              BIP32 commands             #
@@ -662,14 +599,13 @@ class CardConnector:
             authentikey= self.card_bip32_set_authentikey_pubkey(response)
             authentikey_hex= authentikey.get_public_key_bytes(True).hex()
             logger.debug('[card_bip32_import_seed] authentikey_card= ' + authentikey_hex)
-            
-            # compute authentikey locally from seed 
+            self.is_seeded= True
+            # compute authentikey locally from seed (legacy before Satochip v0.12)
             # TODO: remove check if authentikey is not derived from seed
             #pub_hex= self.get_authentikey_from_masterseed(seed)
             # if (pub_hex != authentikey_hex):
                 # raise RuntimeError('Authentikey mismatch: local value differs from card value!')
                 
-            self.is_seeded= True
         elif (sw1==0x9C and sw2==0x17):
             logger.error(f"Error during secret import: card is already seeded (0x9C17)")
             raise CardError('Secure import failed: card is already seeded (0x9C17)!')
@@ -1051,7 +987,7 @@ class CardConnector:
             fingerprint= hash_160(parentkey.get_public_key_bytes(compressed=True))[0:4]
             child_number= bytepath[-4:]
         
-        xprv_header= XPRV_HEADERS_MAINNET[xtype] if is_mainnet else XPPRV_HEADERS_TESTNET[xtype]
+        xprv_header= XPRV_HEADERS_MAINNET[xtype] if is_mainnet else XPRV_HEADERS_TESTNET[xtype]
         xprv = bytes.fromhex(xprv_header) + bytes([depth]) + fingerprint + child_number + childchaincode + bytes([0x00]) + childkey.get_private_key_bytes()
         assert(len(xprv)==78)
         xprv= EncodeBase58Check(xprv)
@@ -1537,6 +1473,10 @@ class CardConnector:
             self.set_pin(0, None) #reset cached PIN value
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             raise PinBlockedError(msg)
+        # card not setup
+        elif sw1==0x9c and sw2==0x04:
+            logger.error(f"In card_verify_PIN_simple setup not done (code 0x9C04)")
+            raise CardSetupNotDoneError(f"Failed to verify PIN: setup not done (code 0x9C04)")
         # any other edge case
         else:
             self.set_pin(0, None) #reset cached PIN value
@@ -1605,7 +1545,14 @@ class CardConnector:
                 msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
                 if self.client is not None:
                     self.client.request('show_error', msg)
-                raise IdentityBlockedError(msg) #RuntimeError(msg)
+                else:
+                    raise IdentityBlockedError(msg)
+            elif sw1==0x9c and sw2==0x04:
+                msg = "Failed to verify PIN: setup not done (code 0x9C04)"
+                if self.client is not None:
+                    self.client.request('show_error', msg)
+                else:
+                    raise CardSetupNotDoneError(msg)
             # any other edge case
             else:
                 self.set_pin(0, None) #reset cached PIN value
@@ -2570,6 +2517,7 @@ class CardConnector:
         logger.debug('In card_verify_authenticity')
         
         # get certificate from device
+        txt_ca = txt_subca = txt_device = "(empty)"
         cert_pem=txt_error=""
         try:
             cert_pem=self.card_export_perso_certificate()
@@ -2586,7 +2534,7 @@ class CardConnector:
             txt_error= "Device certificate is empty: the card has not been personalized!"
         
         if txt_error!="":
-            return False, "(empty)", "(empty)", "(empty)", txt_error
+            return False, txt_ca, txt_subca, txt_device, txt_error
 
         # Perform some checks on the certificate
         validator = CertificateValidator()
@@ -2955,6 +2903,10 @@ class IncorrectUnlockCodeError(ApduError):
 class IncorrectUnlockCounterError(ApduError):
     def __init__(self, message, ins=0x00, response=[]):            
         super().__init__(message, 0x9c, 0x50, ins, response)
+
+class SecureChannelError(Exception):
+    """Exception related to the secure channel"""
+    pass
 
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""
