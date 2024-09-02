@@ -443,7 +443,7 @@ class CardConnector:
         elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
             label= '(none)'
         else:
-            logger.warning(f"Error while recovering card label: {sw1} {sw2}")
+            logger.warning(f"Error while recovering card label: {hex(256*sw1+sw2)}")
             label= '(unknown)'
         
         return (response, sw1, sw2, label)
@@ -463,6 +463,42 @@ class CardConnector:
         
         return (response, sw1, sw2)
     
+    def card_get_ndef(self):
+    
+        logger.debug("In card_get_ndef")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3F
+        p1= 0x00
+        p2= 0x01 #get
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        if (sw1==0x90 and sw2==0x00):
+            ndef_size= response[0]
+            ndef_bytes= bytes(response[1:])
+        elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
+            ndef_bytes= []
+        else:
+            logger.warning(f"Error while recovering card ndef: {hex(256*sw1+sw2)}")
+            ndef_bytes= []
+        
+        return (response, sw1, sw2, ndef_bytes)
+
+    def card_set_ndef(self, ndef_bytes):
+        logger.debug("In card_set_ndef")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3F
+        p1= 0x00
+        p2= 0x00 #set
+        
+        ndef_list= list(ndef_bytes)
+        data= [len(ndef_list)]+ndef_list
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        return (response, sw1, sw2)
+
     def card_set_nfc_policy(self, policy_byte):
         logger.debug("In card_set_nfc_policy")
         cla= JCconstants.CardEdge_CLA
@@ -1807,7 +1843,7 @@ class CardConnector:
             fingerprint_list= response[2:2+4]
             fingerprint= bytes(fingerprint_list).hex()
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             id=None
             fingerprint= None
             
@@ -1835,7 +1871,7 @@ class CardConnector:
             fingerprint_list= response[2:2+4]
             fingerprint= bytes(fingerprint_list).hex()
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             id=None
             fingerprint= None
             
@@ -1887,7 +1923,7 @@ class CardConnector:
                 dic['id_entropy']= id2
                 dic['fingerprint_entropy']= fingerprint2
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             dic['id']= None
             dic['fingerprint']= None
             
@@ -1949,7 +1985,7 @@ class CardConnector:
                     dic['sign']=bytes(sign).hex()
                     dic['error_msg']= str(ex)
         else:
-            logger.error(f"Error during master password derivation: {sw1} {sw2}")
+            logger.error(f"Error during master password derivation: {hex(256*sw1+sw2)}")
             dic = {}
         
         return (response, sw1, sw2, dic)
@@ -2251,7 +2287,7 @@ class CardConnector:
         elif (sw1==0x9C and sw2==0x12):
             logger.debug(f"No more object in memory")
         elif (sw1==0x9C and sw2==0x04):
-            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            logger.warning(f"UninitializedSeedError during object listing: {hex(256*sw1+sw2)}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
@@ -2313,7 +2349,7 @@ class CardConnector:
             else:
                 logger.debug("No logs available!")           
         elif (sw1==0x9C and sw2==0x04):
-            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            logger.warning(f"UninitializedSeedError during object listing: {hex(256*sw1+sw2)}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
@@ -2341,7 +2377,7 @@ class CardConnector:
                 break
             
         if (sw1!=0x90 or sw2!=0x00):
-            logger.warning(f"Error during log printing: {sw1} {sw2}")
+            logger.warning(f"Error during log printing: {hex(256*sw1+sw2)}")
         
         #debug: print logs
         logger.debug(f"LOGS size: {len(logs)}")

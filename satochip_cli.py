@@ -253,6 +253,52 @@ def common_set_card_label(label):
         print(e)
 
 @main.command()
+def common_get_card_ndef():
+    """Retrieves the ndef tag for the card"""
+    try:
+        if cc.card_type != "Satodime":
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+        (response, sw1, sw2, ndef_bytes) = cc.card_get_ndef()
+        print("Device ndef:", ndef_bytes.hex())
+    except Exception as e:
+        print(e)
+
+@main.command()
+@click.option("--ndef", default="", help="Device NDEF in hexadecimal.")
+def common_set_card_ndef(ndef):
+    """Sets a ndef value for the card (Optional)
+    For example:
+    - google.com is 000fD1010B5502676F6F676C652E636F6D
+    - Android app org.satochip.satodimeapp is 002Ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
+    """
+    try:
+        if cc.card_type != "Satodime":
+            # TODO: for satodime, may fail if performed via NFC (needs ownership)
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+
+        ndef_bytes = bytes.fromhex(ndef)
+        (response, sw1, sw2) = cc.card_set_ndef(ndef_bytes)
+        if sw1 != 0x90 or sw2 != 0x00:
+            print("ERROR: Set ndef Failed with error code: {hex(256*sw1+sw2)}")
+        else:
+            print("Device ndef Updated")
+    except Exception as e:
+        print(e)
+
+
+@main.command()
 @click.option("--nfc-policy", default=0, help="NFC Policy: 0 = NFC_ENABLED, 1 = NFC_DISABLED, 2 = NFC_BLOCKED")
 def common_set_nfc_policy(nfc_policy):
     """Sets the NFC interface policy: enable/disable/block card communication through NFC.
@@ -284,7 +330,7 @@ def common_set_nfc_policy(nfc_policy):
         elif (sw1 == 0x9C and sw2 == 0x49):
             print("Cannot set the NFC policy: NFC interface is BLOCKED, a factory reset is required to reenable NFC!")
         else:
-            print(f"Failed to set NFC policy with error code: {hex(sw1)}{hex(sw2)}")
+            print(f"Failed to set NFC policy with error code: {hex(256*sw1+sw2)}")
 
     except Exception as e:
         print(e)
@@ -531,7 +577,7 @@ def satochip_reset_seed():
             if (sw1 == 0x90 and sw2 == 0x00):
                 print("Seed reset successfully!\nYou can now load a new seed")
             else:
-                print(f"Failed to reset seed with error code: {hex(sw1)}{hex(sw2)}")
+                print(f"Failed to reset seed with error code: {hex(256*sw1+sw2)}")
 
         except Exception as e:
             print(e)
@@ -665,7 +711,7 @@ def satochip_disable_2fa():
         if (sw1 == 0x90 and sw2 == 0x00):
             print("2fa reset successfully!")
         else:
-            print(f"Failed to reset 2fa with error code: {hex(sw1)}{hex(sw2)}")
+            print(f"Failed to reset 2fa with error code: {hex(256*sw1+sw2)}")
 
     except Exception as e:
         print(e)
