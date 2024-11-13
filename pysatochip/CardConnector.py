@@ -139,7 +139,7 @@ class RemovalObserver(CardObserver):
 
                 # During factory reset, we should not send other commands than reset...
                 if self.cc.mode_factory_reset == False:
-                    (response, sw1, sw2, status)= self.cc.card_get_status()
+                    (response, sw1, sw2, status)= self.cc.card_get_status() #todo save card_status for reuse
                     if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                         self.cc.card_disconnect()
                         break
