@@ -1681,6 +1681,7 @@ class CardConnector:
         # reset to factory (SeedKeeper v0.2)
         elif sw1==0xFF and sw2==0x00: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
+            self.setup_done = False
             msg = ("CARD RESET TO FACTORY!")
             raise CardResetToFactoryError(msg)
 
@@ -2319,8 +2320,8 @@ class CardConnector:
             dic["is_reset"] = False
             return response, sw1, sw2, dic
         else:
-            logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            logger.warning(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
 
 
     def seedkeeper_print_logs(self, print_all=True):
@@ -2760,7 +2761,7 @@ class CardConnector:
                
         data= self.unlock_counter + unlock_code
         if len(data) != datasize:
-            raise Exception(f"Error in satodime_seal_key: wrong data length {len(data)} instead of {datasize}")
+            raise Exception(f"Error in satodime_get_privkey: wrong data length {len(data)} instead of {datasize}")
         apdu=apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
         self.satodime_increment_unlock_counter()
@@ -2956,6 +2957,7 @@ class UninitializedSeedError(Exception):
     """Raised when the device is not yet seeded"""
     pass
 
+#TODO: set sw1 and sw2 arguments in call!
 class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
     def __init__(self, message, sw1=0x00, sw2=0x00):            
