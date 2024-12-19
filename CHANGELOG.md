@@ -32,6 +32,16 @@ python3 satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 0
 python3 satochip_cli.py satochip-sign-schnorr-hash --hash 796962c8f2a7b8540f818cbe37d2894b1ab4b71bccddced12e2a4dc11d8802c3 --keyslot 0
 ```
 
+More CLI commands:
+* Get satochip_cli help:
+```commandline
+python3 satochip_cli.py
+```
+* Setup new card:
+```commandline
+python3 satochip_cli.py common-initial-setup --label my-card-label
+```
+
 ## [0.15.2]:
 
 Add NDEF support:
