@@ -432,6 +432,89 @@ def common_change_PIN():
         print("Failed: Incorrect PIN")
 
 """##############################
+#           COMMON PKI          #        
+##############################"""
+
+@main.command()
+def common_export_perso_pubkey():
+    """Export the personalisation pubkey from the device"""
+    try:
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+        print(binascii.hexlify(bytearray(cc.card_export_perso_pubkey())).decode())
+    except Exception as e:
+        print(e)
+
+@main.command()
+@click.option("--cert", default=None, help="The device certificate (base64 encoded)")
+@click.option("--cert-file", default=None, help="The device certificate file (base64 encoded)")
+def common_import_perso_certificate(cert, cert_file):
+    """Import a personalisation certificate into the device"""
+    if cert_file:
+        with open(cert_file, 'r', encoding='utf-8') as f:
+                    cert = f.read()
+        cert = cert.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "")
+
+    # TODO: can only import certificate before setup is done
+    # no user pin required
+    cc.card_import_perso_certificate(cert)
+
+@main.command()
+def common_export_perso_certificate():
+    """Export the personalisation certificate that is on the device"""
+    if cc.card_get_status()[3]['setup_done'] == False:
+        print("Unable to perform this function until setup is complete")
+        return
+    try:
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+        print(cc.card_export_perso_certificate())
+    except Exception as e:
+        print(e)
+
+@main.command()
+def common_verify_authenticity():
+    if cc.card_get_status()[3]['setup_done'] == False:
+        print("Unable to perform this function until setup is complete")
+        return
+
+    """Verify the authenticy of the currently connected card"""
+    try:
+
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+
+        is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
+        print("Card is authentic:", is_authentic)
+        print("CA Cert:", txt_ca)
+        print("SubCA Cert:", txt_subca)
+        print("Device Cert:", txt_device)
+        print("Error:", txt_error)
+    except Exception as e:
+        print(e)
+
+"""##############################
 #        SATOCHIP IMPORTS       #        
 ##############################"""
 
@@ -853,9 +936,9 @@ def satochip_disable_2fa():
     except Exception as e:
         print(e)
 
-#################################
+"""##############################
 #           FACTORY RESET       #
-#################################
+##############################"""
 
 @main.command()
 def common_reset_factory():
@@ -1034,9 +1117,9 @@ def common_reset_factory_new():
 
     return
 
-#################################
+"""##############################
 #           SEEDKEEPER          #        
-#################################               
+##############################"""
 
 @main.command()
 def seedkeeper_get_card_status():
@@ -1057,7 +1140,6 @@ def seedkeeper_get_card_status():
     print(f"nb_logs_total: {dic['nb_logs_total']}")
     print(f"nb_logs_avail: {dic['nb_logs_avail']}")
     print(f"last_log: {dic['last_log']}")
-
 
 @main.command()
 @click.option("--label", required=True, help="Label for the secret")
@@ -1615,7 +1697,6 @@ def seedkeeper_reset_secret(sid):
     except Exception as e:
         print(e)  
 
-
 @main.command()
 def seedkeeper_print_logs():
     """Prints Log of operations on device"""
@@ -1665,84 +1746,9 @@ def seedkeeper_print_logs():
     except Exception as e:
         print(e)
 
-@main.command()
-def common_export_perso_pubkey():
-    """Export the personalisation pubkey from the device"""
-    try:
-        # PIN required except for satodime
-        if cc.card_type != "Satodime":
-            # get PIN from environment variable or interactively
-            if 'PYSATOCHIP_PIN' in environ:
-                pin= environ.get('PYSATOCHIP_PIN')
-                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
-            else:
-                pin = getpass("Enter your PIN:")
-            cc.card_verify_PIN(pin)
-        print(binascii.hexlify(bytearray(cc.card_export_perso_pubkey())).decode())
-    except Exception as e:
-        print(e)
-
-@main.command()
-@click.option("--cert", default=None, help="The device certificate (base64 encoded)")
-@click.option("--cert-file", default=None, help="The device certificate file (base64 encoded)")
-def common_import_perso_certificate(cert, cert_file):
-    """Import a personalisation certificate into the device"""
-    if cert_file:
-        with open(cert_file, 'r', encoding='utf-8') as f:
-                    cert = f.read()
-        cert = cert.replace("-----BEGIN CERTIFICATE-----", "").replace("-----END CERTIFICATE-----", "")
-
-    # TODO: can only import certificate before setup is done
-    # no user pin required
-    cc.card_import_perso_certificate(cert)
-
-@main.command()
-def common_export_perso_certificate():
-    """Export the personalisation certificate that is on the device"""
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
-    try:
-        # PIN required except for satodime
-        if cc.card_type != "Satodime":
-            # get PIN from environment variable or interactively
-            if 'PYSATOCHIP_PIN' in environ:
-                pin= environ.get('PYSATOCHIP_PIN')
-                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
-            else:
-                pin = getpass("Enter your PIN:")
-            cc.card_verify_PIN(pin)
-        print(cc.card_export_perso_certificate())
-    except Exception as e:
-        print(e)
-
-@main.command()
-def common_verify_authenticity():
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
-
-    """Verify the authenticy of the currently connected card"""
-    try:
-
-        # PIN required except for satodime
-        if cc.card_type != "Satodime":
-            # get PIN from environment variable or interactively
-            if 'PYSATOCHIP_PIN' in environ:
-                pin= environ.get('PYSATOCHIP_PIN')
-                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
-            else:
-                pin = getpass("Enter your PIN:")
-            cc.card_verify_PIN(pin)
-
-        is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
-        print("Card is authentic:", is_authentic)
-        print("CA Cert:", txt_ca)
-        print("SubCA Cert:", txt_subca)
-        print("Device Cert:", txt_device)
-        print("Error:", txt_error)
-    except Exception as e:
-        print(e)
+"""##############################
+#            SATODIME           #        
+##############################"""
 
 @main.command()
 def satodime_get_card_status():
@@ -1903,6 +1909,10 @@ def satodime_key_reset(slot, unlock_secret, unlock_counter):
 
         print()
         print("Updated Unlock Counter:", bytes(cc.unlock_counter).hex())
+
+"""##############################
+#       SEEDKEEPER UTIL         #        
+##############################"""
 
 @main.command()
 @click.option("--json-file", required=True, help="File containing the encrypted secret")
