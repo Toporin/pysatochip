@@ -179,13 +179,14 @@ class JCconstants:
     INS_SETUP =  0x2A;
 
     # Keys' use and management
-    INS_GEN_KEYPAIR =  0x30;
-    INS_GEN_KEYSYM =  0x31;
-    INS_IMPORT_KEY =  0x32;
-    INS_EXPORT_KEY =  0x34;
-    INS_GET_PUBLIC_FROM_PRIVATE= 0x35;
-    INS_COMPUTE_CRYPT =  0x36;
-    INS_COMPUTE_SIGN =  0x37; # added
+    INS_GEN_KEYPAIR = 0x30
+    INS_GEN_KEYSYM = 0x31
+    INS_IMPORT_KEY = 0x32
+    INS_RESET_KEY = 0x33
+    INS_EXPORT_KEY = 0x34
+    INS_GET_PUBLIC_FROM_PRIVATE = 0x35
+    INS_COMPUTE_CRYPT = 0x36
+    INS_COMPUTE_SIGN = 0x37  # added
 
     # External authentication
     INS_CREATE_PIN =  0x40;

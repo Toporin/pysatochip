@@ -16,23 +16,27 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import click, logging, time, binascii, json, hashlib, base64, sys
-from os import urandom, environ
 from getpass import getpass
+from os import urandom, environ
 
-from ecdsa import SigningKey, SECP256k1, ECDH
+import base64
+import binascii
+import click
+import json
+import logging
+import sys
+import time
+from ecdsa import SECP256k1, ECDH
 from mnemonic import Mnemonic
 
-from pysatochip.CardConnector import (CardConnector, UninitializedSeedError, SeedKeeperError, 
-    IncorrectUnlockCodeError, IncorrectP1Error, IncorrectUnlockCounterError, IncorrectKeyslotStateError, 
-    IncorrectProtocolMediaError, IdentityBlockedError, WrongPinError)
+from pysatochip.CardConnector import (CardConnector, IncorrectUnlockCodeError, IncorrectUnlockCounterError,
+                                      IdentityBlockedError, WrongPinError)
 from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
-from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-from pysatochip.util import msg_magic, list_hyphenated_values, dict_swap_keys_values
 from pysatochip.SecretDecryption import Decrypt_Secret
 from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
 from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
+from pysatochip.util import list_hyphenated_values, dict_swap_keys_values
 
 # CardConnector Object used by everything
 global cc
@@ -43,6 +47,7 @@ logger.setLevel(logging.WARNING)
 
 def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
     print(mnemonic_type)
+    mnemonic_masterseed = None
     if "BIP39" in mnemonic_type:
         mnemonic_obj = Mnemonic("english")
         if mnemonic_obj.check(bip39_mnemonic):
@@ -523,6 +528,7 @@ def common_verify_authenticity():
 def satochip_import_new_mnemonic(use_passphrase):
     """Generates and imports a new BIP39 mnemonic to the SatoChip Device"""
     if click.confirm("WARNING: This tool should only be used to generate a new seed if run in a secure, offline environment. (Like TAILS Linux)  \nAre you sure that you want to do this?", default=False):
+        passphrase = ""
         if use_passphrase:
             passphrase = input("Enter your passphrase:")
         mnemo = Mnemonic("english")
@@ -582,7 +588,8 @@ def satochip_import_unencrypted_mnemonic(use_passphrase, electrum):
         mnemonic_type = "BIP39"
         if electrum: 
             mnemonic_type = "Electrum"
-        mnemonic = input("Enter your mnemonic seed:") 
+        mnemonic = input("Enter your mnemonic seed:")
+        passphrase = ""
         if use_passphrase:
             passphrase = input("Enter your passphrase:") 
         seed = mnemonic_to_masterseed(mnemonic, passphrase, mnemonic_type)
@@ -761,13 +768,109 @@ def satochip_bip32_get_xpub(path, xtype, is_mainnet):
         print(e)
 
 """##############################
+#       SATOCHIP PRIVKEY        #        
+##############################"""
+
+@main.command()
+@click.option("--keyslot", required=True, help="the keyslot where the key should be imported (0-16)")
+@click.option("--privkey", required=True, help="the 32byte private key in hex format")
+def satochip_import_privkey(keyslot, privkey):
+    """Imports a given private ECkey into the card at given keyslot
+    The keyslot provided should be available.
+    The private key should be in hex format (exactly 64 hex chars)
+    """
+    try:
+        keyslot = int(keyslot)
+        # convert privkey hex to bytes
+        privkey_bytes = bytes.fromhex(privkey)
+
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        if (cc.needs_2FA==None):
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+        # import private key
+        cc.satochip_import_privkey(keyslot, privkey_bytes)
+        print(f"Private key imported successfully!")
+
+    except Exception as ex:
+        print(f"Exception during private key import: {ex}")
+
+
+@main.command()
+@click.option("--keyslot", required=True, help="the keyslot where the key should be imported (0-16)")
+def satochip_reset_privkey(keyslot):
+    """Reset the private ECkey at given keyslot"""
+    try:
+        keyslot = int(keyslot)
+
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        hmac=b''
+        if (cc.needs_2FA==None):
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+        # reset private key
+        cc.satochip_reset_privkey(keyslot)
+        print(f"Private key reset successfully!")
+
+    except Exception as ex:
+        print(f"Exception during private key import: {ex}")
+
+@main.command()
+@click.option("--keyslot", required=True, help="the keyslot where the key should be imported (0-16)")
+def satochip_get_pubkey_from_keyslot(keyslot):
+    """return the public key associated with a particular private key stored
+    at a given keyslot.
+    """
+    try:
+        keyslot = int(keyslot)
+
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        hmac=b''
+        if (cc.needs_2FA==None):
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+        # export pubkey
+        pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
+        print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=False).hex()}")
+        print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=True).hex()}")
+
+    except Exception as ex:
+        print(f"Exception during private key import: {ex}")
+
+
+"""##############################
 #       SATOCHIP SIGNATURE      #        
 ##############################"""
 
 @main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
 @click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
 @click.option("--hash", required=True, help="The hash to sign as hex string")
-def satochip_sign_hash(path, hash: str):
+def satochip_sign_hash(hash: str, keyslot, path):
     """Sign a hash with the Satochip"""
 
     hash_bytes = bytes.fromhex(hash)
@@ -788,24 +891,30 @@ def satochip_sign_hash(path, hash: str):
         if cc.needs_2FA:
             raise ValueError("Required 2FA not supported currently!")
         # derive key and sign message
-        keynbr= 0xFF #for extended key
-        (depth, bytepath)= cc.parser.bip32path2bytes(path)
-        (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
-        (response2, sw1, sw2) = cc.card_sign_transaction_hash(keynbr, hash_list, hmac)
-        if (response2==[]):
-            raise Exception("Wrong signature!\nThe 2FA device may have rejected the action.")
+        keyslot = int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath)= cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
+        (response2, sw1, sw2) = cc.card_sign_transaction_hash(keyslot, hash_list, hmac)
+        if response2 == []:
+            print("Wrong signature: the 2FA device may have rejected the action.")
         else:
-            #print("Signature (Base64):", base64.b64encode(compsig).decode())
             print("Signature (hex):", bytes(response2).hex())
 
     except Exception as e:
         print(e)
 
 @main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
 @click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
 @click.option("--hash", required=True, help="The hash to sign as hex string")
-def satochip_sign_schnorr_hash(path, hash: str):
-    """Sign a hash with the Satochip using schnorr signature"""
+def satochip_sign_schnorr_hash(hash: str, keyslot, path):
+    """Sign a hash with the Satochip using schnorr signature
+    If keyslot is provided, use the private key loaded at given keyslot.
+    Else if path is provided, use key derived from the BIP32 seed at given path.
+    If none is provided, use default path m/44'/0'/0'/0/0 and BIP32 derivation.
+    """
 
     # todo: check version support (must be >=0.14)
 
@@ -827,22 +936,27 @@ def satochip_sign_schnorr_hash(path, hash: str):
         if cc.needs_2FA:
             raise ValueError("Required 2FA not supported currently!")
         # derive key
-        keynbr = 0xFF #for extended key
-        (depth, bytepath) = cc.parser.bip32path2bytes(path)
-        (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
-        print(f"pubkey: {pubkey.get_public_key_bytes(compressed=False).hex()}")
+        keyslot = int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath) = cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
+            print(f"pubkey for BIP32 derivation: {pubkey.get_public_key_bytes(compressed=False).hex()}")
+        else:
+            pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
+            print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=False).hex()}")
 
         # tweak key (or bypass)
+        # todo: currently bypass tweak by default
         tweak = None
-        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keynbr, tweak, bypass_flag=True)
+        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=True)
         print(f"pubkey after tweak: {bytes(response).hex()}")
 
         # sign hash
-        (response2, sw1, sw2) = cc.card_sign_schnorr_hash(keynbr, hash_list, hmac)
-        if (response2==[]):
-            raise Exception("Wrong signature!\nThe 2FA device may have rejected the action.")
+        (response2, sw1, sw2) = cc.card_sign_schnorr_hash(keyslot, hash_list, hmac)
+        if response2 == []:
+            print("Wrong signature: the 2FA device may have rejected the action.")
         else:
-            #print("Signature (Base64):", base64.b64encode(compsig).decode())
             print("Signature (hex):", bytes(response2).hex())
 
     except Exception as e:
@@ -850,9 +964,10 @@ def satochip_sign_schnorr_hash(path, hash: str):
 
 
 @main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
 @click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
 @click.option("--message", required=True, help="The message to sign")
-def satochip_sign_message(path, message):
+def satochip_sign_message(message, keyslot, path):
     """Sign a Message with the Satochip"""
     message_byte = message.encode('utf8')
 
@@ -876,13 +991,18 @@ def satochip_sign_message(path, message):
             # do challenge-response with 2FA device...
             hmac = do_challenge_response(msg)
             hmac = bytes.fromhex(hmac)
-        # derive key and sign message
-        keynbr= 0xFF #for extended key
-        (depth, bytepath)= cc.parser.bip32path2bytes(path)
-        (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
-        (response2, sw1, sw2, compsig) = cc.card_sign_message(keynbr, pubkey, message_byte, hmac)
-        if (compsig==b''):
-            raise Exception("Wrong signature!\nThe 2FA device may have rejected the action.")
+        # derive key
+        keyslot= int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath)= cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
+        else:
+            pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
+        # sign message
+        (response2, sw1, sw2, compsig) = cc.card_sign_message(keyslot, pubkey, message_byte, hmac)
+        if  compsig == b'':
+            print("Wrong signature: the 2FA device may have rejected the action.")
         else:
             print("Signature (Base64):", base64.b64encode(compsig).decode())
 
@@ -1062,8 +1182,7 @@ def common_reset_factory_new():
             break
         except WrongPinError as ex:
             print(ex)
-            pinRemaining = (ex.sw2 & ~0xc0)
-            print(f"pinRemaining: {pinRemaining}")
+            print(f"pinRemaining: {ex.pin_left}")
         except Exception as ex:
             print(ex)
 
