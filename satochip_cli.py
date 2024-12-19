@@ -171,6 +171,10 @@ def main(verbose, devicefilter):
 
     logger.debug("In main() end")
 
+"""##############################
+#        COMMON FUNCTIONS       #        
+##############################"""
+
 @main.command()
 def common_get_card_type():
     """Return detected card type"""
@@ -297,7 +301,6 @@ def common_set_card_ndef(ndef):
     except Exception as e:
         print(e)
 
-
 @main.command()
 @click.option("--nfc-policy", default=0, help="NFC Policy: 0 = NFC_ENABLED, 1 = NFC_DISABLED, 2 = NFC_BLOCKED")
 def common_set_nfc_policy(nfc_policy):
@@ -390,6 +393,47 @@ def common_initial_setup(label):
 
     if len(label) > 0:
         common_set_card_label(["--label", label])
+
+"""##############################
+#        COMMON PIN MGMT        #        
+##############################"""
+
+@main.command()
+def common_verify_PIN():
+    """Verify that the pin supplied by --pin matches the current device pin"""
+    try:
+        pin = getpass("Enter your PIN:")
+        (response, sw1, sw2) = cc.card_verify_PIN(pin)
+        if sw1 != 0x90 or sw2 != 0x00:
+            print("ERROR: Incorrect Pin Supplied")
+        else:
+            print("Correct Pin Verified")
+
+    except Exception as e:
+        print(e)
+
+@main.command()
+def common_change_PIN():
+    """Change the card PIN"""
+
+    pin = getpass("Enter your current PIN:")
+    new_pin = getpass("Enter your new PIN:")
+    new_pin2 = getpass("Confirm your new PIN:")
+    if new_pin != new_pin2:
+        print("ERROR! The two new PINs provided do not match!")
+        exit()
+
+    pin = list(pin.encode('utf8'))
+    new_pin = list(new_pin.encode('utf8'))
+    response, sw1, sw2 = cc.card_change_PIN(0, pin, new_pin)
+    if sw1 == 0x90 and sw2 == 0x00:
+        print("Success: Pin Changed")
+    if sw1 == 0x63:
+        print("Failed: Incorrect PIN")
+
+"""##############################
+#        SATOCHIP IMPORTS       #        
+##############################"""
 
 @main.command()
 @click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
@@ -633,6 +677,95 @@ def satochip_bip32_get_xpub(path, xtype, is_mainnet):
     except Exception as e:
         print(e)
 
+"""##############################
+#       SATOCHIP SIGNATURE      #        
+##############################"""
+
+@main.command()
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
+@click.option("--hash", required=True, help="The hash to sign as hex string")
+def satochip_sign_hash(path, hash: str):
+    """Sign a hash with the Satochip"""
+
+    hash_bytes = bytes.fromhex(hash)
+    hash_list = list(hash_bytes)
+
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        hmac=b''
+        if cc.needs_2FA is None:
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+        # derive key and sign message
+        keynbr= 0xFF #for extended key
+        (depth, bytepath)= cc.parser.bip32path2bytes(path)
+        (pubkey, chaincode)= cc.card_bip32_get_extendedkey(bytepath)
+        (response2, sw1, sw2) = cc.card_sign_transaction_hash(keynbr, hash_list, hmac)
+        if (response2==[]):
+            raise Exception("Wrong signature!\nThe 2FA device may have rejected the action.")
+        else:
+            #print("Signature (Base64):", base64.b64encode(compsig).decode())
+            print("Signature (hex):", bytes(response2).hex())
+
+    except Exception as e:
+        print(e)
+
+@main.command()
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
+@click.option("--hash", required=True, help="The hash to sign as hex string")
+def satochip_sign_schnorr_hash(path, hash: str):
+    """Sign a hash with the Satochip using schnorr signature"""
+
+    # todo: check version support (must be >=0.14)
+
+    hash_bytes = bytes.fromhex(hash)
+    hash_list = list(hash_bytes)
+
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+        # check if 2FA is required
+        hmac = None
+        if cc.needs_2FA is None:
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+        # derive key
+        keynbr = 0xFF #for extended key
+        (depth, bytepath) = cc.parser.bip32path2bytes(path)
+        (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
+        print(f"pubkey: {pubkey.get_public_key_bytes(compressed=False).hex()}")
+
+        # tweak key (or bypass)
+        tweak = None
+        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keynbr, tweak, bypass_flag=True)
+        print(f"pubkey after tweak: {bytes(response).hex()}")
+
+        # sign hash
+        (response2, sw1, sw2) = cc.card_sign_schnorr_hash(keynbr, hash_list, hmac)
+        if (response2==[]):
+            raise Exception("Wrong signature!\nThe 2FA device may have rejected the action.")
+        else:
+            #print("Signature (Base64):", base64.b64encode(compsig).decode())
+            print("Signature (hex):", bytes(response2).hex())
+
+    except Exception as e:
+        print(e)
+
+
 @main.command()
 @click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
 @click.option("--message", required=True, help="The message to sign")
@@ -651,15 +784,15 @@ def satochip_sign_message(path, message):
         # check if 2FA is required
         hmac=b''
         if (cc.needs_2FA==None):
-            (response, sw1, sw2, d)=client.cc.card_get_status()
+            (response, sw1, sw2, d) = cc.card_get_status()
         if cc.needs_2FA:
             # challenge based on sha256(btcheader+msg)
             # format & encrypt msg
-            msg= {'action':"sign_msg", 'msg':message}
-            msg=  json.dumps(msg)
-            #do challenge-response with 2FA device...
-            hmac= do_challenge_response(msg)
-            hmac= bytes.fromhex(hmac)
+            msg = {'action':"sign_msg", 'msg':message}
+            msg = json.dumps(msg)
+            # do challenge-response with 2FA device...
+            hmac = do_challenge_response(msg)
+            hmac = bytes.fromhex(hmac)
         # derive key and sign message
         keynbr= 0xFF #for extended key
         (depth, bytepath)= cc.parser.bip32path2bytes(path)
@@ -672,6 +805,10 @@ def satochip_sign_message(path, message):
 
     except Exception as e:
         print(e)
+
+"""##############################
+#          SATOCHIP 2FA         #        
+##############################"""
 
 @main.command()
 def satochip_import_unencrypted_2fa_key():
@@ -716,38 +853,9 @@ def satochip_disable_2fa():
     except Exception as e:
         print(e)
 
-@main.command()
-def common_verify_PIN():
-    """Verify that the pin supplied by --pin matches the current device pin"""
-    try:
-        pin = getpass("Enter your PIN:")
-        (response, sw1, sw2) = cc.card_verify_PIN(pin)
-        if sw1 != 0x90 or sw2 != 0x00:
-            print("ERROR: Incorrect Pin Supplied")
-        else:
-            print("Correct Pin Verified")
-
-    except Exception as e:
-        print(e)
-
-@main.command()
-def common_change_PIN():
-    """Change the card PIN"""
-
-    pin = getpass("Enter your current PIN:")
-    new_pin = getpass("Enter your new PIN:")
-    new_pin2 = getpass("Confirm your new PIN:")
-    if new_pin != new_pin2:
-        print("ERROR! The two new PINs provided do not match!")
-        exit()
-
-    pin = list(pin.encode('utf8'))
-    new_pin = list(new_pin.encode('utf8'))
-    response, sw1, sw2 = cc.card_change_PIN(0, pin, new_pin)
-    if sw1 == 0x90 and sw2 == 0x00:
-        print("Success: Pin Changed")
-    if sw1 == 0x63:
-        print("Failed: Incorrect PIN")
+#################################
+#           FACTORY RESET       #
+#################################
 
 @main.command()
 def common_reset_factory():
@@ -837,7 +945,6 @@ def common_reset_factory_legacy():
                 print("The factory reset has been cancelled")
                 break
     return
-
 
 def common_reset_factory_new():
     """Initiate the Factory Reset Process
@@ -1138,7 +1245,7 @@ def seedkeeper_import_secret(type, subtype, label, export_rights, use_passphrase
             bip39_entropy_bytes = mnemonic_to_entropy(secret, wordlist)
             bip39_entropy_list = list(bip39_entropy_bytes)
         except Exception as ex:
-            exit(e)
+            exit()
         bip39_passphrase_list = list(bytes(bip39_passphrase, 'utf-8'))
         try:
             masterseed_bytes= mnemonic_to_masterseed(secret, bip39_passphrase, 'BIP39 mnemonic')
