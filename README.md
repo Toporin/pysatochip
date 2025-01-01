@@ -22,9 +22,12 @@ Satochip-2FA is an optional feature that allows to use 2-Factor-Authentication i
 
 ## Installing this Module
 
-This module is available for download on PyPy with the command 'pip3 install pysatochip'
+This module is available for download on PyPy with the command `pip3 install pysatochip`.
 
-You can install this module on your system with the command 'python setup.py install'
+You can install this module on your system with the command `python setup.py install`.
+
+To use the Command Line Interface, you need to install additional dependencies, use this command instead: `pip install "pysatochip[CLI]"` or `pip install -e ".[CLI]"` (local install). 
+
 
 ## Command Line Interface
 Once you have installed the module, you can access its functionality through a command line client `satochip-cli` 

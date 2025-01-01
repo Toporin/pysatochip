@@ -34,6 +34,9 @@ setuptools.setup(
         'Tracker': 'https://github.com/Toporin/pysatochip/issues',
     },
     install_requires=requirements,
+    extras_require={
+        "CLI": ["mnemonic", "click"],
+    },
     packages=setuptools.find_packages(),
     package_dir={
         'pysatochip': 'pysatochip'

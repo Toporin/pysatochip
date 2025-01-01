@@ -4,9 +4,6 @@
 import hashlib
 import binascii
 from typing import Union, Tuple, Optional
-from mnemonic import Mnemonic
-from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
-from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
 
 bfh = bytes.fromhex
 hfu = binascii.hexlify
@@ -134,22 +131,5 @@ def base_encode(v: bytes, *, base: int) -> str:
 def dict_swap_keys_values(dictionary):
     return {value: key for key, value in dictionary.items()}
 
-def list_hypenated_values(dictionary):
+def list_hyphenated_values(dictionary):
     return [value.replace(" ", "_") for key, value in dictionary.items()]
-
-def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
-    print(mnemonic_type)
-    if "BIP39" in mnemonic_type:
-        mnemonic_obj = Mnemonic("english")
-        if mnemonic_obj.check(bip39_mnemonic):
-            mnemonic_masterseed = Mnemonic.to_seed(bip39_mnemonic, bip39_passphrase)
-        else:
-            raise Exception("Invalid Mnemonic Checksum (Perhaps an Electrum seed?)")
-
-    if "Electrum" in mnemonic_type:
-        if len(electrum_seedtype(bip39_mnemonic)) > 0:
-            mnemonic_masterseed = electrum_mnemonic.mnemonic_to_seed(bip39_mnemonic, bip39_passphrase)
-        else:
-            raise Exception("Invalid Mnemonic Checksum (Perhaps an BIP39 seed?)")
-
-    return mnemonic_masterseed
