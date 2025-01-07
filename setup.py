@@ -29,7 +29,7 @@ setuptools.setup(
         'Github': 'https://github.com/Toporin',
         'Webshop': 'https://satochip.io/',
         'Telegram': 'https://t.me/Satochip',
-        'Twitter': 'https://twitter.com/satochipwallet',
+        'Twitter': 'https://twitter.com/satochip',
         'Source': 'https://github.com/Toporin/pysatochip/',
         'Tracker': 'https://github.com/Toporin/pysatochip/issues',
     },
