@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.3]:
+
+* Add support for Schnorr signatures:
+    - sign hash with card_sign_schnorr_hash()
+    - private key must be tweaked before signing using card_taproot_tweak_privkey()
+* Add support for single private key wallet:
+    - import a secp256k1 private key with satochip_import_privkey()
+    - reset a secp256k1 private key satochip_reset_privkey()
+    - recover the pubkey of a private key with satochip_get_pubkey_from_keyslot()
+* Also add suport for these functions in CLI.
+
+These functions are not yet supported when 2FA is enabled.
+
+Some examples:
+* Import a private key on slot #0:
+```commandline
+python3 satochip_cli.py --verbose satochip-import-privkey --keyslot 0 --privkey aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899
+```
+* Get the corresponding publick key:
+```commandline
+python3 satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 0
+```
+* Sign a hash with Schnorr on this slot:
+```commandline
+python3 satochip_cli.py satochip-sign-schnorr-hash --hash 796962c8f2a7b8540f818cbe37d2894b1ab4b71bccddced12e2a4dc11d8802c3 --keyslot 0
+```
+
+More CLI commands:
+* Get satochip_cli help:
+```commandline
+python3 satochip_cli.py
+```
+* Setup new card:
+```commandline
+python3 satochip_cli.py common-initial-setup --label my-card-label
+```
+
+## [0.15.2]:
+
+Add NDEF support:
+* get or set an NDEF tag for the card (if supported by the card)
+* also add support in command line tool
+
 ## [0.15.1]:
 
 Add support for Seedkeeper v0.2:

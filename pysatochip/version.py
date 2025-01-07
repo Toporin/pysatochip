@@ -37,8 +37,10 @@ SATODIME_PROTOCOL_VERSION= (SATODIME_PROTOCOL_MAJOR_VERSION<<8)+SATODIME_PROTOCO
 # v0.14.1: add Satodime support
 # v0.14.2: minor improvements & corrections to support Satochip & Satodime
 # v0.14.3: add CLI & bugfix 
-# v0.15.1: WIP - support for SeedKeeper v0.2
+# v0.15.1: support for SeedKeeper v0.2
+# v0.15.2: add NDEF support
+# v0.15.3: add support for Schnorr signatures & single-key wallet in Satochip
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 15
-PYSATOCHIP_REVISION= 1
+PYSATOCHIP_REVISION= 3
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

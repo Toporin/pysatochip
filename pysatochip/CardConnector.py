@@ -139,7 +139,7 @@ class RemovalObserver(CardObserver):
 
                 # During factory reset, we should not send other commands than reset...
                 if self.cc.mode_factory_reset == False:
-                    (response, sw1, sw2, status)= self.cc.card_get_status()
+                    (response, sw1, sw2, status)= self.cc.card_get_status() #todo save card_status for reuse
                     if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                         self.cc.card_disconnect()
                         break
@@ -443,7 +443,7 @@ class CardConnector:
         elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
             label= '(none)'
         else:
-            logger.warning(f"Error while recovering card label: {sw1} {sw2}")
+            logger.warning(f"Error while recovering card label: {hex(256*sw1+sw2)}")
             label= '(unknown)'
         
         return (response, sw1, sw2, label)
@@ -463,6 +463,42 @@ class CardConnector:
         
         return (response, sw1, sw2)
     
+    def card_get_ndef(self):
+    
+        logger.debug("In card_get_ndef")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3F
+        p1= 0x00
+        p2= 0x01 #get
+        apdu=[cla, ins, p1, p2]
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        if (sw1==0x90 and sw2==0x00):
+            ndef_size= response[0]
+            ndef_bytes= bytes(response[1:])
+        elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
+            ndef_bytes= []
+        else:
+            logger.warning(f"Error while recovering card ndef: {hex(256*sw1+sw2)}")
+            ndef_bytes= []
+        
+        return (response, sw1, sw2, ndef_bytes)
+
+    def card_set_ndef(self, ndef_bytes):
+        logger.debug("In card_set_ndef")
+        cla= JCconstants.CardEdge_CLA
+        ins= 0x3F
+        p1= 0x00
+        p2= 0x00 #set
+        
+        ndef_list= list(ndef_bytes)
+        data= [len(ndef_list)]+ndef_list
+        lc=len(data)
+        apdu=[cla, ins, p1, p2, lc]+data
+        (response, sw1, sw2)= self.card_transmit(apdu)
+        
+        return (response, sw1, sw2)
+
     def card_set_nfc_policy(self, policy_byte):
         logger.debug("In card_set_nfc_policy")
         cla= JCconstants.CardEdge_CLA
@@ -563,6 +599,104 @@ class CardConnector:
             logger.info(f"APDU reset transmitted with result code {hex(256*sw1+sw2)}")
         return response, sw1, sw2
 
+    ###########################################
+    #      Satochip private key commands      #
+    ###########################################
+
+    def satochip_import_privkey(self, keyslot_nbr, privkey: bytes):
+        """This function imports a private ECkey into the card.
+
+        Currently, only secp256k1 key are supported.
+        If 2FA is enabled, a hmac code must be provided (Not implemented yet!)
+
+        Return void if successful, otherwise throw an error
+        """
+        logger.debug("In satochip_import_privkey")
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_IMPORT_KEY
+        p1 = keyslot_nbr
+        p2 = 0x00
+
+        # data: [key_encoding(1) | key_type(1) | key_size(2) | RFU(6) | key_blob | (option)HMAC - 2FA(20b)]
+        key_encoding = JCconstants.BLOB_ENC_PLAIN
+        key_type = 	12 # KeyBuilder.TYPE_EC_FP_PRIVATE
+        key_size = [0x01, 0x00] # 256bits
+        rfu = 6 * [0x00]
+        key_blob = list(privkey)
+        if len(key_blob) == 32:
+            key_blob = [0x00, 0x20] + key_blob
+        else:
+            raise ValueError(f"Wrong private key size during import private_key size: {len(key_blob)} instead of 32")
+        hmac= [] # todo, currently 2FA is not supported for this operation
+        data = [key_encoding, key_type] + key_size + rfu + key_blob + hmac
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG satochip_import_privkey apdu: {apdu}")
+
+        # send apdu (contains sensitive data!)
+        response, sw1, sw2 = self.card_transmit(apdu)
+
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.error(f"Error during privkey import: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256*sw1+sw2)})", sw1=sw1, sw2=sw2)
+
+        return
+
+    def satochip_reset_privkey(self, keyslot_nbr):
+        """This function reset a private ECkey  previously imported into the card.
+
+        If 2FA is enabled, a hmac code must be provided (Not implemented yet!)
+
+        Return void if successful, otherwise throw an error
+        """
+        logger.debug("In satochip_reset_privkey")
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_RESET_KEY
+        p1 = keyslot_nbr
+        p2 = 0x00
+
+        # data: [(option)HMAC-2FA(20b)]
+        hmac = []  # todo, currently 2FA is not supported for this operation
+        data = hmac
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+
+        # send apdu (contains sensitive data!)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})")
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1=sw1, sw2=sw2)
+
+        return
+
+    def satochip_get_pubkey_from_keyslot(self, keyslot_nbr):
+        """return the public key associated with a particular private key stored
+        at a given keyslot in the applet.
+        The exact key blob contents depend on the key algorithm and type.
+
+        return(SECP256K1):
+         the public key object for the given slot
+         raise an error if the slot is not initialized
+        """
+        logger.debug("In satochip_get_pubkey_from_keyslot")
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_GET_PUBLIC_FROM_PRIVATE
+        p1 = keyslot_nbr
+        p2 = 0x00
+        apdu = [cla, ins, p1, p2]
+
+        # send apdu (contains sensitive data!)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})")
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1=sw1,
+                                      sw2=sw2)
+
+        # response [coordx_size(2b) | pubkey_coordx | sig_size(2b) | sig]
+        pubkey = self.parser.parse_get_pubkey_from_keyslot(response)
+        return pubkey
 
     ###########################################
     #              BIP32 commands             #
@@ -1039,9 +1173,9 @@ class CardConnector:
         for i in reversed(range(4)):
             apdu+= [((buffer_left>>(8*i)) & 0xff)]
         if altcoin:
-	            apdu+= [len(altcoin)]
-	            apdu+=altcoin 
-                
+            apdu+= [len(altcoin)]
+            apdu+=altcoin
+
         # send apdu
         (response, sw1, sw2) = self.card_transmit(apdu)
 
@@ -1190,7 +1324,7 @@ class CardConnector:
 
         if len(txhash)!=32:
             raise ValueError("Wrong txhash length: " + str(len(txhash)) + "(should be 32)")
-        elif chalresponse==None:
+        elif chalresponse is None:
             data= txhash
         else:
             if len(chalresponse)!=20:
@@ -1201,8 +1335,79 @@ class CardConnector:
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
-        return (response, sw1, sw2)
-     
+        return response, sw1, sw2
+
+    def card_sign_schnorr_hash(self, keynbr, txhash, chalresponse):
+        ''' Sign the transaction hash in the device using schnorr signature
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        txhash (list): the transaction hash
+        chalresponse (list): the hmac code if 2FA is enabled
+
+        Returns:
+        (response, sw1, sw2)
+        response (list): the signature as 64bytes (see bip341)
+        '''
+
+        logger.debug("In card_sign_schnorr_hash")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7B
+        p1 = keynbr
+        p2 = 0x00
+
+        if len(txhash) != 32:
+            raise ValueError("Wrong txhash length: " + str(len(txhash)) + "(should be 32)")
+        elif chalresponse is None:
+            data = txhash
+        else:
+            if len(chalresponse) != 20:
+                raise ValueError("Wrong Challenge response length:" + str(len(chalresponse)) + "(should be 20)")
+            data = txhash + list(bytes.fromhex("8000")) + chalresponse  # 2 middle bytes for 2FA flag
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        return response, sw1, sw2
+
+    def card_taproot_tweak_privkey(self, keynbr, tweak, bypass_flag: bool = False):
+        '''This function tweaks the currently available private stored in the Satochip.
+        Tweaking is based on the 'taproot_tweak_seckey(seckey0, h)' algorithm specification defined here:
+        https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki#constructing-and-spending-taproot-outputs
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        tweak (list): the transaction hash
+        bypass_flag (bool): if set to True, key tweaking is bypassed
+
+        returns:
+        (response, sw1, sw2)
+        response (list): tweaked Pubkey in uncompressed form (65 bytes)
+        '''
+        logger.debug("in card_taproot_tweak_privkey")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7C
+        p1 = keynbr
+        p2 = 0x00 if not bypass_flag else 0x01
+
+        if tweak is None:
+            tweak = 32 * [0] # by default use a 32-byte vector filled with '0x00'
+
+        if len(tweak) != 32:
+            raise ValueError("Wrong tweak length (should be 32)")
+
+        data = [len(tweak)] + tweak
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        return response, sw1, sw2
+
     ###########################################
     #              2FA commands               #
     ###########################################
@@ -1645,6 +1850,7 @@ class CardConnector:
         # reset to factory (SeedKeeper v0.2)
         elif sw1==0xFF and sw2==0x00: 
             self.set_pin(pin_nbr, None) #reset cached PIN value
+            self.setup_done = False
             msg = ("CARD RESET TO FACTORY!")
             raise CardResetToFactoryError(msg)
 
@@ -1807,7 +2013,7 @@ class CardConnector:
             fingerprint_list= response[2:2+4]
             fingerprint= bytes(fingerprint_list).hex()
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             id=None
             fingerprint= None
             
@@ -1835,7 +2041,7 @@ class CardConnector:
             fingerprint_list= response[2:2+4]
             fingerprint= bytes(fingerprint_list).hex()
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             id=None
             fingerprint= None
             
@@ -1887,7 +2093,7 @@ class CardConnector:
                 dic['id_entropy']= id2
                 dic['fingerprint_entropy']= fingerprint2
         else:
-            logger.error(f"Error during masterseed generation: {sw1} {sw2}")
+            logger.error(f"Error during masterseed generation: {hex(256*sw1+sw2)}")
             dic['id']= None
             dic['fingerprint']= None
             
@@ -1949,7 +2155,7 @@ class CardConnector:
                     dic['sign']=bytes(sign).hex()
                     dic['error_msg']= str(ex)
         else:
-            logger.error(f"Error during master password derivation: {sw1} {sw2}")
+            logger.error(f"Error during master password derivation: {hex(256*sw1+sw2)}")
             dic = {}
         
         return (response, sw1, sw2, dic)
@@ -2251,7 +2457,7 @@ class CardConnector:
         elif (sw1==0x9C and sw2==0x12):
             logger.debug(f"No more object in memory")
         elif (sw1==0x9C and sw2==0x04):
-            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            logger.warning(f"UninitializedSeedError during object listing: {hex(256*sw1+sw2)}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
@@ -2283,8 +2489,8 @@ class CardConnector:
             dic["is_reset"] = False
             return response, sw1, sw2, dic
         else:
-            logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            logger.warning(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
 
 
     def seedkeeper_print_logs(self, print_all=True):
@@ -2313,7 +2519,7 @@ class CardConnector:
             else:
                 logger.debug("No logs available!")           
         elif (sw1==0x9C and sw2==0x04):
-            logger.warning(f"UninitializedSeedError during object listing: {sw1} {sw2}")
+            logger.warning(f"UninitializedSeedError during object listing: {hex(256*sw1+sw2)}")
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
@@ -2341,7 +2547,7 @@ class CardConnector:
                 break
             
         if (sw1!=0x90 or sw2!=0x00):
-            logger.warning(f"Error during log printing: {sw1} {sw2}")
+            logger.warning(f"Error during log printing: {hex(256*sw1+sw2)}")
         
         #debug: print logs
         logger.debug(f"LOGS size: {len(logs)}")
@@ -2662,6 +2868,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_set_keyslot_status_part0 error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
         return (response, sw1, sw2)
@@ -2688,6 +2898,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_set_keyslot_status_part1 error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
         return (response, sw1, sw2)  
@@ -2724,9 +2938,13 @@ class CardConnector:
                
         data= self.unlock_counter + unlock_code
         if len(data) != datasize:
-            raise Exception(f"Error in satodime_seal_key: wrong data length {len(data)} instead of {datasize}")
+            raise Exception(f"Error in satodime_get_privkey: wrong data length {len(data)} instead of {datasize}")
         apdu=apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_get_privkey error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
         self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
@@ -2735,7 +2953,7 @@ class CardConnector:
         # parse answer
         (entropy_list, privkey_list, sig_list) = self.parser.parse_satodime_get_privkey(response, key_nbr)
 
-        return (response, sw1, sw2, entropy_list, privkey_list)
+        return response, sw1, sw2, entropy_list, privkey_list
 
 
     def satodime_seal_key(self, key_nbr: int, entropy_user):
@@ -2759,6 +2977,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_seal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
         self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
@@ -2786,7 +3008,11 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_unseal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
+        self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None: # Need to cache the pubkey if this hasn't been done already
             self.card_export_authentikey()
@@ -2794,7 +3020,7 @@ class CardConnector:
         # parse answer
         (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
         
-        return (response, sw1, sw2, entropy_list, privkey_list)
+        return response, sw1, sw2, entropy_list, privkey_list
     
     def satodime_reset_key(self, key_nbr: int):
         logger.debug("In satodime_reset_key")
@@ -2814,9 +3040,13 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
-        
-        return (response, sw1, sw2)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_unseal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
+        self.satodime_increment_unlock_counter()
+
+        return response, sw1, sw2
     
     def satodime_initiate_ownership_transfer(self):
         
@@ -2834,9 +3064,13 @@ class CardConnector:
         data=self.unlock_counter +  unlock_code
         apdu= apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.warning(f"In satodime_initiate_ownership_transfer error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
-        return (response, sw1, sw2)
+        return response, sw1, sw2
     
     #################################
     #            HELPERS            #        
@@ -2920,6 +3154,7 @@ class UninitializedSeedError(Exception):
     """Raised when the device is not yet seeded"""
     pass
 
+#TODO: set sw1 and sw2 arguments in call!
 class UnexpectedSW12Error(Exception):
     """Raised when the device returns an unexpected error code"""
     def __init__(self, message, sw1=0x00, sw2=0x00):            

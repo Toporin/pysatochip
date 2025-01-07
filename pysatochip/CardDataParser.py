@@ -196,6 +196,21 @@ class CardDataParser:
 
         return entropy_bytes
 
+    def parse_get_pubkey_from_keyslot(self, response) -> ECPubkey:
+        logger.debug("In parse_get_pubkey_from_keyslot")
+        # response: [coordx_size(2b) | pubkey_coordx | sig_size(2b) | sig]
+        data_size = ((response[0] & 0xff) << 8) + (response[1] & 0xff)
+        data = response[2:(2 + data_size)]
+        msg_size = 2 + data_size
+        msg = response[0:msg_size]
+        sig_size = ((response[msg_size] & 0xff) << 8) + (response[msg_size + 1] & 0xff)
+        signature = response[(msg_size + 2):(msg_size + 2 + sig_size)]
+        if sig_size == 0:
+            raise ValueError("Signature missing")
+        # self-signed
+        coordx = data
+        pubkey = self.get_pubkey_from_signature(coordx, msg, signature)
+        return pubkey
 
     def parse_initiate_secure_channel(self, response):
             logger.debug("In parse_initiate_secure_channel")
@@ -472,7 +487,7 @@ class CardDataParser:
             else:
                 sigout[32-i]=0
         # extract s
-        check= sigin[4+lr];
+        check= sigin[4+lr]
         if check!= 0x02:
             raise ValueError("Second check byte should be 0x02")
         ls= sigin[5+lr]
@@ -481,9 +496,9 @@ class CardDataParser:
         for i in range(32):
             tmp= sigin[5+lr+ls-i]
             if ls>=(i+1):
-                sigout[64-i]= tmp;
+                sigout[64-i]= tmp
             else:
-                sigout[64-i]=0; 
+                sigout[64-i]=0
         # 1 byte header
         if recid>3 or recid<0:
             raise ValueError("Wrong recid value")
@@ -492,7 +507,7 @@ class CardDataParser:
         else:
             sigout[0]= 27 + recid
 
-        return sigout;
+        return sigout
     
     # def parse_compact_sig_to_ethcompsig(self, compsig):
         # print("    =>parse_compact_sig_to_ethcompsig - compsig:"+compsig.hex())
@@ -775,7 +790,7 @@ class CardDataParser:
         
         # check that entropy_coordx correspond to authentikey_coordx
         if (entropy_coordx != self.authentikey_coordx):
-            raise Exception(f"Satodime error: entropy_coordx {bytes(entropy_coordx).hex()} for keyslot {key_nbr} does not match authentikey_coordx {bytes(authentikey_coordx).hex()}")
+            raise Exception(f"Satodime error: entropy_coordx {bytes(entropy_coordx).hex()} for keyslot {key_nbr} does not match authentikey_coordx {bytes(self.authentikey_coordx).hex()}")
         
         # check that privkey is correctly derived from entropy:
         digest= sha256()
