@@ -2868,6 +2868,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_set_keyslot_status_part0 error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
         return (response, sw1, sw2)
@@ -2894,6 +2898,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_set_keyslot_status_part1 error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
         return (response, sw1, sw2)  
@@ -2933,6 +2941,10 @@ class CardConnector:
             raise Exception(f"Error in satodime_get_privkey: wrong data length {len(data)} instead of {datasize}")
         apdu=apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_get_privkey error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
         self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
@@ -2941,7 +2953,7 @@ class CardConnector:
         # parse answer
         (entropy_list, privkey_list, sig_list) = self.parser.parse_satodime_get_privkey(response, key_nbr)
 
-        return (response, sw1, sw2, entropy_list, privkey_list)
+        return response, sw1, sw2, entropy_list, privkey_list
 
 
     def satodime_seal_key(self, key_nbr: int, entropy_user):
@@ -2965,6 +2977,10 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_seal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
         self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None:  # Need to cache the pubkey if this hasn't been done already
@@ -2992,7 +3008,11 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_unseal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
+
+        self.satodime_increment_unlock_counter()
 
         if self.parser.authentikey is None: # Need to cache the pubkey if this hasn't been done already
             self.card_export_authentikey()
@@ -3000,7 +3020,7 @@ class CardConnector:
         # parse answer
         (entropy_list, privkey_list, sig_list)= self.parser.parse_satodime_get_privkey(response, key_nbr)
         
-        return (response, sw1, sw2, entropy_list, privkey_list)
+        return response, sw1, sw2, entropy_list, privkey_list
     
     def satodime_reset_key(self, key_nbr: int):
         logger.debug("In satodime_reset_key")
@@ -3020,9 +3040,13 @@ class CardConnector:
         apdu=apduheader+data
         
         (response, sw1, sw2)= self.card_transmit(apdu)
-        self.satodime_increment_unlock_counter() 
-        
-        return (response, sw1, sw2)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.debug(f"In satodime_unseal_key error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
+        self.satodime_increment_unlock_counter()
+
+        return response, sw1, sw2
     
     def satodime_initiate_ownership_transfer(self):
         
@@ -3040,9 +3064,13 @@ class CardConnector:
         data=self.unlock_counter +  unlock_code
         apdu= apduheader+data
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            logger.warning(f"In satodime_initiate_ownership_transfer error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2
+
         self.satodime_increment_unlock_counter() 
         
-        return (response, sw1, sw2)
+        return response, sw1, sw2
     
     #################################
     #            HELPERS            #        
