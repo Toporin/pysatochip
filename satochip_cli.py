@@ -2004,10 +2004,35 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                         logger.warning(f"Error during passphrase decoding: {ex}")
                         passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
 
-                    secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'  
+                    secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'
 
                 elif stype == 'Password':
-                    secret_string = "\"" + binascii.unhexlify(secret_dict['secret'])[1:].decode() + "\""
+
+                    password_length = secret_dict['secret_list'][0]
+                    try:
+                        login_length = secret_dict['secret_list'][password_length + 1]
+                        url_length = secret_dict['secret_list'][password_length + login_length + 2]
+                    except IndexError: # Older Seedkeeper software didn't include these optional fields
+                        login_length = 0
+                        url_length = 0
+
+                    secret_string = ""
+
+                    # Password is always present, so no need to test for this
+                    password_text = binascii.unhexlify(secret_dict['secret'])[1:password_length+1].decode()
+                    secret_string += "\nPassword:" + "\"" + password_text + "\""
+
+                    if login_length > 0:
+                        login_text = binascii.unhexlify(secret_dict['secret'])[
+                                     password_length + 2: password_length + login_length + 2].decode()
+                        secret_string += "\nLogin:" + "\"" + login_text + "\""
+
+                    if url_length > 0:
+                        url_text = binascii.unhexlify(secret_dict['secret'])[-url_length:].decode()
+                        secret_string += "\nURL:" + "\"" + url_text + "\""
+
+                elif stype in ('Descriptor', 'Data'):
+                    secret_string = "\"" + binascii.unhexlify(secret_dict['secret'])[2:].decode() + "\""
 
                 else:
                     secret_string = "\"" + secret_dict['secret'][2:] + "\""
