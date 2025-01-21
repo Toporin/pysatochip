@@ -15,19 +15,24 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 from getpass import getpass
+from hashlib import sha256
 from os import urandom, environ
-
 import base64
 import binascii
-import click
 import json
 import logging
 import sys
 import time
+from typing import Tuple, Dict, List, Any
+
+import click
+import websockets
+import asyncio
 from ecdsa import SECP256k1, ECDH
 from mnemonic import Mnemonic
+from nostr.event import Event, EventKind
+from smartcard.System import readers
 
 from pysatochip.CardConnector import (CardConnector, IncorrectUnlockCodeError, IncorrectUnlockCounterError,
                                       IdentityBlockedError, WrongPinError)
@@ -44,6 +49,7 @@ global cc
 logging.basicConfig(level=logging.WARNING, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
+
 
 def mnemonic_to_masterseed(bip39_mnemonic, bip39_passphrase, mnemonic_type):
     print(mnemonic_type)
@@ -72,6 +78,7 @@ def mnemonic_to_entropy(bip39_mnemonic, wordlist):
 
     return entropy # bytearray
 
+
 def entropy_to_mnemonic(entropy_bytes, wordlist):
     print(f"Worldlist: {wordlist}")
 
@@ -79,6 +86,7 @@ def entropy_to_mnemonic(entropy_bytes, wordlist):
     mnemonic = mnemonic_obj.to_mnemonic(entropy_bytes)
 
     return mnemonic # str
+
 
 def do_challenge_response(msg):
     (id_2FA, msg_out) = cc.card_crypt_transaction_2FA(msg, True)
@@ -107,6 +115,31 @@ def do_challenge_response(msg):
         reply_decrypt = reply_decrypt.split(":")
         hmac = reply_decrypt[1]
     return hmac  # return a hexstring
+
+
+async def broadcast_event_async(event, relay_url):
+    """Broadcasts a Nostr event to a relay via websocket"""
+    logger.debug(f"Event string to publish: {event}")
+
+    try:
+        async with websockets.connect(relay_url) as websocket:
+            logger.debug(f"Connected to {relay_url}")
+            await websocket.send(event)
+
+            print("Event sent, awaiting response...")
+
+            response = await websocket.recv()
+            print(f"Received response: {response}")
+
+    except Exception as e:
+        logger.warning(f"Error broadcasting event: {e}")
+
+
+def broadcast_event(event, relay):
+    """Synchronous wrapper for broadcast_event_async"""
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(broadcast_event_async(event, relay))
+
 
 # Accept any prefix of a command name.
 #
@@ -946,10 +979,9 @@ def satochip_sign_schnorr_hash(hash: str, keyslot, path):
             pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
             print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=False).hex()}")
 
-        # tweak key (or bypass)
-        # todo: currently bypass tweak by default
+        # tweak key
         tweak = None
-        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=True)
+        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=False)
         print(f"pubkey after tweak: {bytes(response).hex()}")
 
         # sign hash
@@ -962,6 +994,106 @@ def satochip_sign_schnorr_hash(hash: str, keyslot, path):
     except Exception as e:
         print(e)
 
+
+@main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
+@click.option("--message", prompt="Enter your message", help="Message for the Nostr event")
+@click.option("--kind", default="1", help="Kind for the Nostr event")
+@click.option("--broadcast", is_flag=True, default=False, help="Broadcast the event to the relay")
+@click.option("--relay", default="wss://relay.damus.io", help="Nostr relay URL to use")
+def satochip_sign_nostr_event(keyslot, path: str, message: str, kind: str, broadcast: bool, relay: str):
+    """Sign a Nostr event with the Satochip using schnorr signature.
+    The signed event can also be brodacasted on request.
+    If keyslot is provided, use the private key loaded at given keyslot.
+    Else if path is provided, use key derived from the BIP32 seed at given path.
+    If none is provided, use default path m/44'/0'/0'/0/0 and BIP32 derivation.
+    """
+
+    # todo: check version support (must be >=0.14)
+
+    # derive & export pubkey from card
+    compressed_pubkey = None
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin = environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        # check if 2FA is required
+        if cc.needs_2FA == None:
+            (response, sw1, sw2, d) = cc.card_get_status()
+        if cc.needs_2FA:
+            raise ValueError("Required 2FA not supported currently!")
+
+        # derive key
+        keyslot = int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath) = cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
+            print(f"pubkey for BIP32 derivation: {pubkey.get_public_key_bytes(compressed=False).hex()}")
+        else:
+            pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
+
+        # export pubkey
+        #pubkey = cc.satochip_get_pubkey_from_keyslot(keyslot)
+        compressed_pubkey = pubkey.get_public_key_bytes(compressed=True).hex()
+        print(f"Recovered pubkey: {compressed_pubkey}")
+
+    except Exception as ex:
+        print(f"Exception during public key export: {ex}")
+
+    # Create Nostr event
+    kind = int(kind)
+    event = Event(
+        kind=EventKind(kind),
+        content=message,
+        public_key=compressed_pubkey[2:] # remove compression byte
+    )
+    event_id = event.id
+    print(f"Unsigned event: {event.to_message()}")
+    print(f"Unsigned event id: {event_id}")
+
+    # Sign the event
+    signature = ""
+    try:
+        click.echo("Signing event")
+        hash_bytes = bytes.fromhex(event_id)
+        hash_list = list(hash_bytes)
+
+        # tweak key (or bypass)
+        # todo: currently bypass tweak by default
+        tweak = None
+        (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=True)
+        print(f"pubkey after tweak: {bytes(response).hex()}")
+
+        # sign hash
+        hmac = None # 2FA not supported yet
+        (response2, sw1, sw2) = cc.card_sign_schnorr_hash(keyslot, hash_list, hmac)
+        if response2 == []:
+            print("Wrong signature: the 2FA device may have rejected the action.")
+        else:
+            signature = str(bytes(response2).hex())
+
+    except Exception as e:
+        print(e)
+
+    # Display, verify & broadcast the event
+    event.signature = signature
+    print(f"Signed event: {event.to_message()}")
+    print(f"Signed event Hash: {event.id}")
+
+    # Validate the Signature
+    is_verified = event.verify()
+    print(f"Signed event is_verified: {is_verified}")
+
+    if broadcast:
+        click.echo("\nBroadcasting event to relay...")
+        broadcast_event(event.to_message(), relay)
 
 @main.command()
 @click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
@@ -2058,6 +2190,18 @@ def util_generate_local_keypair():
     print("Privkey:", privkey.decode())
     print("Pubkey:", '04' + pubkey)
 
+
+@main.command()
+def util_find_card_reader():
+    available_readers = readers()
+    print("Available readers:", available_readers)
+
+    if available_readers:
+        connection = available_readers[0].createConnection()
+        connection.connect()
+        print("ATR:", connection.getATR())
+    else:
+        print("No readers available.")
 
 if __name__ == '__main__':
     main()
