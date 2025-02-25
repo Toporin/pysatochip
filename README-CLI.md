@@ -31,6 +31,8 @@ python3 setup.py install[CLI]
 
 ## Sign Nostr event
 
+_Note: to use this functionality you will need a card with the Satochip applet [v0.14-0.2](https://github.com/Toporin/SatochipApplet/releases/tag/v0.14-0.2) or higher._
+
 * Import a private key on slot #0:
 ```commandline
 python3 satochip_cli.py --verbose satochip-import-privkey --keyslot 0 --privkey aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899
