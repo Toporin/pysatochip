@@ -240,6 +240,10 @@ class CardConnector:
             # PIN authentication is required
             if (sw1==0x9C) and (sw2==0x06):
                 (response, sw1, sw2)= self.card_verify_PIN_simple()
+            # secure channel not initialized
+            elif (sw1==0x9C) and (sw2==0x21):
+                logger.error("In card_transmit secure channel not initialized (0x9C21)")
+                self.card_initiate_secure_channel()
             #decrypt response
             elif (sw1==0x90) and (sw2==0x00):
                 if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
@@ -394,7 +398,7 @@ class CardConnector:
                 self.is_seeded= d["is_seeded"]= False if response[9]==0X00 else True
             # setup status
             if len(response) >=11:
-	                self.setup_done= d["setup_done"]= False if response[10]==0X00 else True    
+                self.setup_done= d["setup_done"]= False if response[10]==0X00 else True
             else:
                 self.setup_done= d["setup_done"]= True    
             # secure channel status
@@ -1650,13 +1654,23 @@ class CardConnector:
         apdu=[cla, ins, 0x00, 0x00, len(pin_0)] + pin_0
         
         if (self.needs_secure_channel):
-                apdu = self.card_encrypt_secure_channel(apdu)
+            apdu = self.card_encrypt_secure_channel(apdu)
         response, sw1, sw2 = self.cardservice.connection.transmit(apdu)
-        
+
+        # secure channel not initialized
+        if sw1 == 0x9c and sw2 == 0x21:
+            logger.error("In card_verify_PIN_simple secure channel not initialized (0x9C21)")
+            self.card_initiate_secure_channel()
+            #raise UninitializedSecureChannelError('Secure channel is not initialized')
+            # resend verify PIN command
+            apdu = [cla, ins, 0x00, 0x00, len(pin_0)] + pin_0
+            apdu = self.card_encrypt_secure_channel(apdu)
+            response, sw1, sw2 = self.cardservice.connection.transmit(apdu)
+
         # correct PIN: cache PIN value
         if sw1==0x90 and sw2==0x00: 
             self.set_pin(0, pin_0) 
-            return (response, sw1, sw2)     
+            return response, sw1, sw2
         # wrong PIN, get remaining tries available (since v0.11)
         elif sw1==0x63 and (sw2 & 0xc0)==0xc0:
             logger.error("In card_verify_PIN_simple wrong PIN!")
@@ -1717,7 +1731,7 @@ class CardConnector:
             apdu=[cla, ins, 0x00, 0x00, len(pin_0)] + pin_0
             
             if (self.needs_secure_channel):
-	                apdu = self.card_encrypt_secure_channel(apdu)
+                apdu = self.card_encrypt_secure_channel(apdu)
             response, sw1, sw2 = self.cardservice.connection.transmit(apdu)
             
             # correct PIN: cache PIN value
@@ -1815,7 +1829,7 @@ class CardConnector:
         elif sw1==0x9c and sw2==0x0c:
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             raise PinBlockedError(msg)
-	        
+
         return (response, sw1, sw2)      
 
     def card_unblock_PIN(self, pin_nbr, ublk):
