@@ -137,7 +137,8 @@ async def broadcast_event_async(event, relay_url):
 
 def broadcast_event(event, relay):
     """Synchronous wrapper for broadcast_event_async"""
-    loop = asyncio.get_event_loop()
+    #loop = asyncio.get_event_loop()./
+    loop = asyncio.new_event_loop()
     loop.run_until_complete(broadcast_event_async(event, relay))
 
 
