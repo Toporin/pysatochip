@@ -30,11 +30,13 @@ To use the Command Line Interface, you need to install additional dependencies, 
 
 
 ## Command Line Interface
-Once you have installed the module, you can access its functionality through a command line client `satochip-cli` 
+Once you have installed the module, you can access its functionality through a command line client `satochip-cli`.
 
 There are a wide range of available commands, each with their own relevant options. The best way to find these is with the `--help` argument. (`satochip-cli --help`)
 
 _There are also some general tools, such as those required to decrypt encrypted Seedkeeper JSON backups. (These can be accessed either standalone or via the module)_
+
+More details about the `satochip-cli` [here](https://github.com/Toporin/pysatochip/blob/master/README-CLI.md).
 
 ## Running from Source
 
