@@ -198,6 +198,11 @@ class CardConnector:
         self.cert_pem=None # PEM certificate of device, if any
         # cache protocol version (version x.y => 256*x+y)
         self.protocol_version = 0
+        self.nfc_policy = None
+        self.feature_schnorr_policy = None
+        self.feature_nostr_policy = None
+        self.feature_liquid_policy = None
+
 
         # cardservice
         self.cardservice= None #will be instantiated when a card is inserted
@@ -411,7 +416,19 @@ class CardConnector:
                 self.nfc_policy= d["nfc_policy"]= response[12] # 0:NFC_ENABLED, 1:NFC_DISABLED, 2:NFC_BLOCKED
             else:
                 self.nfc_policy= d["nfc_policy"]= 0x00 # NFC_ENABLED by default
-        
+            # optional features policy
+            # currently only for satochip v0.14-0.5+
+            if len(response) >=16:
+                # 0:FEATURE_ENABLED, 1:FEATURE_DISABLED, 2:FEATURE_BLOCKED
+                self.feature_schnorr_policy= d["feature_schnorr_policy"]= response[13]
+                self.feature_nostr_policy = d["feature_nostr_policy"] = response[14]
+                self.feature_liquid_policy = d["feature_liquid_policy"] = response[15]
+            else:
+                # unsupported by default
+                self.feature_schnorr_policy = d["feature_schnorr_policy"] = None
+                self.feature_nostr_policy = d["feature_nostr_policy"] = None
+                self.feature_liquid_policy = d["feature_liquid_policy"] = None
+
         elif (sw1==0x9c) and (sw2==0x04):
             self.setup_done= d["setup_done"]= False  
             self.is_seeded= d["is_seeded"]= False
@@ -515,6 +532,20 @@ class CardConnector:
         apdu=[cla, ins, p1, p2, lc]+data
         (response, sw1, sw2)= self.card_transmit(apdu)
         
+        return (response, sw1, sw2)
+
+    def card_set_feature_policy(self, feature_id_byte, feature_policy_byte):
+        logger.debug("In card_set_feature_policy")
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x3A
+        p1 = feature_id_byte
+        p2 = feature_policy_byte
+
+        data = []
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
         return (response, sw1, sw2)
 
     def card_setup(self,
@@ -1132,7 +1163,34 @@ class CardConnector:
         logger.info(f"card_bip32_get_xpub(): xprv={str(xprv)}")#debugSatochip
         return xprv
 
-       
+    def card_bip32_get_liquid_master_blinding_key(self):
+        logger.info("card_bip32_get_liquid_master_blinding_key");
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7D
+        p1 = 0x00
+        p2 = 0x00
+        lc = 0x00
+        apdu = [cla, ins, p1, p2, lc]
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
+        if (sw1 != 0x90 or sw2 != 0x00):
+            raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256 * sw1 + sw2)})', sw1, sw2)
+
+        offset=0
+        keySize= 256 * (response[offset] & 0xff) + response[offset+1]
+        offset+=2
+        blindingKey= response[2:2+keySize]
+        offset += keySize
+
+        sigSize= 256 * response[offset] + response[offset+1]
+        offset+=2
+        sig= response[offset:(offset+sigSize)]
+        offset += sigSize
+        # todo verify signature
+
+        return blindingKey
+
     ###########################################
     #            Signing commands             #
     ###########################################

@@ -378,6 +378,41 @@ def common_set_nfc_policy(nfc_policy):
         print(e)
 
 @main.command()
+@click.option("--feature-id", default=0, help="Feature ID: 0 = FEATURE_ID_SCHNORR, 1 = FEATURE_ID_NOSTR, 2 = FEATURE_ID_LIQUID")
+@click.option("--feature-policy", default=0, help="Feature Policy: 0 = FEATURE_ENABLED, 1 = FEATURE_DISABLED, 2 = FEATURE_BLOCKED")
+def common_set_feature_policy(feature_id, feature_policy):
+    """Sets the feature usage policy: enable/disable/block the feature with given ID.
+    WARNING: if the policy is set to 2 (FEATURE_BLOCKED), it can only be reenabled through a factory reset!"""
+
+    try:
+        if (feature_policy == 2):
+            if click.confirm("Are you sure that you want to block feature? Feature can only be reenabled with factory reset!", default=False):
+                # we don't try to recover PIN from environment variables for destructive operations
+                pin = getpass("Enter your PIN:")
+            else:
+                print("Blocking feature cancelled!")
+                exit()
+        else:
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+
+        cc.card_verify_PIN(pin)
+        (response, sw1, sw2) = cc.card_set_feature_policy(feature_id, feature_policy)
+        if (sw1 == 0x90 and sw2 == 0x00):
+            print("New feature policy applied successfully!")
+        elif (sw1 == 0x9C and sw2 == 0x4B):
+            print("Cannot set the feature policy: feature is BLOCKED, a factory reset is required to reenable it!")
+        else:
+            print(f"Failed to set feature policy with error code: {hex(256*sw1+sw2)}")
+
+    except Exception as e:
+        print(e)
+
+@main.command()
 @click.option("--label", default="", help="Card Label")
 def common_initial_setup(label):
     """Run the initial card setup process"""
@@ -798,6 +833,24 @@ def satochip_bip32_get_xpub(path, xtype, is_mainnet):
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
         print(cc.card_bip32_get_xpub(path, xtype, is_mainnet))
+    except Exception as e:
+        print(e)
+
+@main.command()
+def satochip_bip32_get_liquid_master_blinding_key():
+    """Get the Liquid-Bitcoin Master Blinding Key. This is required on the host side to unblind output amounts in Liquid-Bitcoin confidential transactions"""
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        master_blinding_key = bytes(cc.card_bip32_get_liquid_master_blinding_key())
+        print(f"Liquid-Bitcoin Master Blinding Key: {master_blinding_key.hex()}")
+
     except Exception as e:
         print(e)
 
