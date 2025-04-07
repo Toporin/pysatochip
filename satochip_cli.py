@@ -2405,9 +2405,48 @@ def satocash_export_proofs(index_list: str):
         string_values = index_list.split(',')
         # Convert each string value to integer, stripping whitespace
         index_list = [int(value.strip()) for value in string_values]
+        print(f"index_list: {index_list}")
 
         proofs = cc.satocash_export_proofs(index_list)
         print(f"Proofs: {proofs}")
+
+        # convert to tokenv4
+        # keep it simple: generate on token per proof
+        for proof in proofs:
+            try:
+                keyset_index = proof["keyset_index"]
+
+                # recover keyset id, unit & mint info
+                response, sw1, sw2, keysets, keysets_dic = cc.satocash_export_keysets([keyset_index])
+                keyset_id = keysets[0].get("id")
+                mint_index = keysets[0].get("mint_index")
+                unitByte = keysets[0].get("unit")
+                dic_unit = {1:"sat", 2:"msat", 3:"USD", 4:"EUR"}
+                unit = dic_unit[unitByte]
+
+                # recover mint_url
+                response, sw1, sw2, mint_url = cc.satocash_export_mint(index= mint_index)
+                print(f"mint_url: {mint_url}")
+
+                # generate tokenv4 dict
+                tokenv4_dic = {'m': mint_url, 'u': unit, 'd': 'Satocash token'}
+                token_dic = {}
+                token_dic['i'] = keyset_id
+                proof_dic = {
+                    'a': proof['amount'],
+                    's': proof['secret_hex'],
+                    'c': bytes.fromhex(proof['unblinded_key_hex'])
+                }
+                token_dic['p'] = [proof_dic]
+                tokenv4_dic['t'] = [token_dic]
+
+                # serialize token dic to string
+                tokenv4_str = satocash_serialize_tokenv4(tokenv4_dic)
+                print(f"tokenv4_str: {tokenv4_str}")
+
+            except Exception as ex:
+                print(f"Error while serializing proofs to tokens: {ex}")
+                print(traceback.format_exc())
 
     except Exception as ex:
         print(f"Error during proof export: {ex}")

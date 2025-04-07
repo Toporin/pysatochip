@@ -2921,8 +2921,8 @@ class CardConnector:
         p1 = 0x00
         p2 = 0x00
 
-        # data: [keyset_index(1b) | amount_exponent(1b) | secret(32b) | unblinded_key(32b)]
-        data = [keyset_index, amount_exponent] + list(secret_bytes) + list(unblinded_key_bytes)
+        # data: [keyset_index(1b) | amount_exponent(1b) | unblinded_key(33b) | secret(32b)]
+        data = [keyset_index, amount_exponent] + list(unblinded_key_bytes) + list(secret_bytes)
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
         response, sw1, sw2 = self.card_transmit(apdu)
@@ -2962,7 +2962,7 @@ class CardConnector:
         proofs = []
 
         def parse_proofs_from_rapdu(response: list[int]):
-            """ response format [proof_index(2b) | proof_state(1b) | keyset_index(1b) | amount_exponent(1b) | secret(32b) | unblinded_key(32b)]"""
+            """ response format [proof_index(2b) | proof_state(1b) | keyset_index(1b) | amount_exponent(1b) | unblinded_key(33b) | secret(32b)]"""
             proof_list = []
             proof_dic = {}
             response_size= len(response)
@@ -2976,9 +2976,9 @@ class CardConnector:
                 pos+=1
                 proof_amount_exponent = response[pos]
                 pos+=1
+                unblindex_key_hex = bytes(response[pos:(pos + 33)]).hex()
+                pos += 33
                 proof_secret_hex = bytes(response[pos:(pos+32)]).hex()
-                pos+=32
-                unblindex_key_hex = "02"+bytes(response[pos:(pos+32)]).hex()
                 pos+=32
 
                 dict= {
@@ -2997,7 +2997,8 @@ class CardConnector:
         # OP_INIT
         response, sw1, sw2 = self.card_transmit(apdu)
         if sw1 == 0x90 and sw2 == 0x00:
-            proofs+= parse_proofs_from_rapdu(response)
+            proof_list, proof_dic = parse_proofs_from_rapdu(response)
+            proofs += proof_list
 
         #9C06 SW_UNAUTHORIZED, 9C11 SW_INCORRECT_P2, 6700 SW_WRONG_LENGTH, 9C0F SW_INVALID_PARAMETER,
         elif sw1 == 0x9C and sw2 == 0x06:
@@ -3022,8 +3023,8 @@ class CardConnector:
             apdu = [cla, ins, p1, p2]
             response, sw1, sw2 = self.card_transmit(apdu)
             if sw1 == 0x90 and sw2 == 0x00:
-                proofs += parse_proofs_from_rapdu(response)
-
+                proof_list, proof_dic = parse_proofs_from_rapdu(response)
+                proofs += proof_list
 
             # exceptions (OP_PROCESS): 9C06 SW_UNAUTHORIZED, 9C11 SW_INCORRECT_P2, 9C13 SW_INCORRECT_INITIALIZATION,
             elif sw1 == 0x9C and sw2 == 0x06:
