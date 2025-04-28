@@ -2955,8 +2955,6 @@ class CardConnector:
 
         # todo: 2FA support
 
-
-
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
         proofs = []

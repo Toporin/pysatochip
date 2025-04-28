@@ -2661,8 +2661,9 @@ def satocash_import_tokenv4(tokenv4: str):
             amount = proof_dic['a']
             secret_hex = proof_dic['s']
             unblinded_key_bytes = proof_dic['c']
-            if len(unblinded_key_bytes)==33:
-                unblinded_key_bytes = unblinded_key_bytes[1:]
+            if len(unblinded_key_bytes) != 33:
+                print(f"Wrong unblinded_key size: {len(unblinded_key_bytes)} (should be 33)")
+                return
 
             # import proof
             try:
@@ -2787,7 +2788,7 @@ def satocash_export_tokenv4(unit, amount):
             proof_indexes_subset = proof_indexes_by_keyset[keyset_index]
             print(f"proof_indexes_subset: {proof_indexes_subset}")
             # export proofs
-            proof_list, proofs_dic = cc.satocash_export_proofs(list(proof_indexes_subset))
+            proof_list = cc.satocash_export_proofs(list(proof_indexes_subset))
             for proof in proof_list:
                 proof_dic = {
                     'a':proof['amount'],
