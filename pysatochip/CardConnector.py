@@ -19,7 +19,7 @@ import hmac
 import base64
 import logging
 from os import urandom
-from typing import Union
+from typing import Union, List, Optional
 
 #debug
 # import sys
@@ -1482,6 +1482,110 @@ class CardConnector:
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         return response, sw1, sw2
+
+    def card_musig2_generate_nonce(self, keynbr: int, aggpk: Optional[bytes], msg: Optional[bytes], extra: Optional[bytes]):
+        '''This function generate a MuSig2 nonce for the currently available private key stored in the Satochip.
+        Generation is based on the BIP-0327 specification: https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki.
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        aggpk (list): the x-only aggregate public key
+        msg (list): the message (should be 127-bytes or less)
+        extra_bytes (list): auxiliary input (should be 127-bytes or less)
+
+        returns:
+        (response, sw1, sw2)
+        '''
+        logger.debug("in card_musig2_generate_nonce")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7E
+        p1 = keynbr
+        p2 = 0x00 # default, RFU
+
+        # data: [aggpk_size(1b) | aggpk | msg_size (1b) | msg | extra_size(1b) | extra_bytes]
+        data = []
+        if aggpk is None:
+            data += [0x00]
+        else:
+            data += [len(aggpk)] + list(aggpk)
+        if msg is None:
+            data += [0xff]
+        else:
+            data += [len(msg)] + list(msg)
+        if extra is None:
+            data += [0x00]
+        else:
+            data += [len(extra)] + list(extra)
+        #data = [len(aggpk)] + list(aggpk) + [len(msg)] + list(msg) + [len(extra)] + list(extra)
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        return response, sw1, sw2
+
+    def card_musig2_sign_hash(self, keynbr: int, secnonce: bytes, b: bytes, ea: bytes, r_has_even_y: bool, ggacc_is_1: bool):
+        '''This function generate a MuSig2 signature for the currently available private key stored in the Satochip.
+        The signature is computed based on secnonce and intermediate values b, ea, R_evenness and ggac.
+        Signature is based on the BIP-0327 specification: https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki.
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        secnonce (bytes):
+        ea (bytes):
+        b (bytes):
+
+        returns:
+        (response, sw1, sw2)
+        '''
+        logger.debug("in card_musig2_sign_hash")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7F
+        p1 = keynbr
+
+
+        # OP_INIT
+        p2 = JCconstants.OP_INIT
+
+        # data: [secnonce(128b)]
+        assert len(secnonce) == 128
+        data = list(secnonce)
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        print(f"DEBUG OP_INIT sw12: {hex(256*sw1+sw2)}")
+
+        # OP_FINALIZE
+        p2 = JCconstants.OP_FINALIZE
+
+        # data: [ b(32b)| ea(32b) | R_evenness(1b) | ggacc(1b) ]
+        assert len(b) == 32
+        assert len(ea) == 32
+        data = list(b)
+        data += list(ea)
+        if r_has_even_y:
+            data += [0x00]
+        else:
+            data += [0x01]
+        if ggacc_is_1:
+            data += [0x01]
+        else:
+            data += [0x00]
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        return response, sw1, sw2
+
 
     ###########################################
     #              2FA commands               #

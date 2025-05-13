@@ -1198,6 +1198,84 @@ def satochip_sign_message(message, keyslot, path):
     except Exception as e:
         print(e)
 
+
+@main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
+def satochip_musig2_generate_nonce(keyslot):
+
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        # setup satochip using python3 -B satochip_cli.py common-initial-setup
+        # first import test privkey "0202020202020202020202020202020202020202020202020202020202020202" in keyslot 1
+        # using python3 -B satochip_cli.py satochip-import-privkey --keyslot 1 --privkey 0202020202020202020202020202020202020202020202020202020202020202
+        # corresponding pubkey is 024D4B6CD1361032CA9BD2AEB9D900AA4D45D9EAD80AC9423374C451A7254D0766
+        # using python3 -B satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 1
+
+        aggpk = bytes.fromhex("0707070707070707070707070707070707070707070707070707070707070707")
+        msg = bytes.fromhex("0101010101010101010101010101010101010101010101010101010101010101")
+        #msg = bytes.fromhex("")
+        #msg = None
+        extra = bytes.fromhex("0808080808080808080808080808080808080808080808080808080808080808")
+
+        response, sw1, sw2 = cc.card_musig2_generate_nonce(keynbr=int(keyslot), aggpk=aggpk, msg=msg, extra=extra)
+        print(f"sw12: {hex(256*sw1+sw2)}")
+        print(f"response: {bytes(response).hex()}")
+
+        # "expected_secnonce": "B114E502BEAA4E301DD08A50264172C84E41650E6CB726B410C0694D59EFFB6495B5CAF28D045B973D63E3C99A44B807BDE375FD6CB39E46DC4A511708D0E9D2024D4B6CD1361032CA9BD2AEB9D900AA4D45D9EAD80AC9423374C451A7254D0766",
+        # "expected_pubnonce": "02F7BE7089E8376EB355272368766B17E88E7DB72047D05E56AA881EA52B3B35DF02C29C8046FDD0DED4C7E55869137200FBDBFE2EB654267B6D7013602CAED3115A"
+
+    except Exception as e:
+        print(e)
+
+
+@main.command()
+@click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
+def satochip_musig2_sign_hash(keyslot):
+
+    try:
+        # get PIN from environment variable or interactively
+        if 'PYSATOCHIP_PIN' in environ:
+            pin= environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        # setup satochip using python3 -B satochip_cli.py common-initial-setup
+        # first import test privkey 7fb9e0e687ada1eebf7ecfe2f21e73ebdb51a7d450948dfe8d76d7f2d1007671 in keyslot
+        # using python3 -B satochip_cli.py satochip-import-privkey --keyslot 0 --privkey 7fb9e0e687ada1eebf7ecfe2f21e73ebdb51a7d450948dfe8d76d7f2d1007671
+        # corresponding pubkey is 03935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9
+        # using python3 -B satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 0
+
+        # test vector
+        secnonce = bytes.fromhex("508B81A611F100A6B2B6B29656590898AF488BCF2E1F55CF22E5CFB84421FE61FA27FD49B1D50085B481285E1CA205D55C82CC1B31FF5CD54A489829355901F703935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9")
+        secnonce = secnonce + (128-len(secnonce))*bytes.fromhex("00") # pad to reach 128 bytes
+        #secnonce = 128 * bytes.fromhex("00")  # pad to reach 128 bytes
+
+        b = bytes.fromhex("f6311d2583176bb178ec12973b760a2d733544d4c72b4b3a8c260f7679f7d9c6")
+        ea = bytes.fromhex("f696bb3be7fc4ee399c173813d0bddded1471cfe8acf5f729b1610d489eb3600")
+        r_has_even_y = False
+        ggacc_is_1 = True
+
+        response, sw1, sw2 = cc.card_musig2_sign_hash(keynbr=int(keyslot), secnonce=secnonce, b=b, ea=ea, r_has_even_y=r_has_even_y, ggacc_is_1=ggacc_is_1)
+        print(f"sw12: {hex(256*sw1+sw2)}")
+        print(f"response: {bytes(response).hex()}")
+
+        print(f"psig expected: 012ABBCB52B3016AC03AD82395A1A415C48B93DEF78718E62A7A90052FE224FB")
+
+    except Exception as e:
+        print(e)
+
+
+
+
 """##############################
 #          SATOCHIP 2FA         #        
 ##############################"""
