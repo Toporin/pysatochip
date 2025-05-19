@@ -1493,15 +1493,16 @@ class CardConnector:
         msg (list): the message (should be 127-bytes or less)
         extra_bytes (list): auxiliary input (should be 127-bytes or less)
 
-        returns:
-        (response, sw1, sw2)
+        returns: pubnonce, encrypted_sec_nonce
         '''
         logger.debug("in card_musig2_generate_nonce")
 
         cla = JCconstants.CardEdge_CLA
         ins = 0x7E
         p1 = keynbr
-        p2 = 0x00 # default, RFU
+
+        # OP_INIT: recover pubnonce
+        p2 = JCconstants.OP_INIT
 
         # data: [aggpk_size(1b) | aggpk | msg_size (1b) | msg | extra_size(1b) | extra_bytes]
         data = []
@@ -1520,11 +1521,26 @@ class CardConnector:
         #data = [len(aggpk)] + list(aggpk) + [len(msg)] + list(msg) + [len(extra)] + list(extra)
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG apdu: {bytes(apdu).hex()}")
+        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
 
         # send apdu
-        response, sw1, sw2 = self.card_transmit(apdu)
-        return response, sw1, sw2
+        pubnonce, sw1, sw2 = self.card_transmit(apdu)
+        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
+        print(f"DEBUG pubnonce: {bytes(pubnonce).hex()}")
+
+        # OP_FINALIZE: recover encrypted_secnonce
+        p2 = JCconstants.OP_FINALIZE
+        data = []
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        encrypted_secnonce, sw1, sw2 = self.card_transmit(apdu)
+        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
+        print(f"DEBUG encrypted_secnonce: {bytes(encrypted_secnonce).hex()}")
+
+        return pubnonce, encrypted_secnonce
 
     def card_musig2_sign_hash(self, keynbr: int, secnonce: bytes, b: bytes, ea: bytes, r_has_even_y: bool, ggacc_is_1: bool):
         '''This function generate a MuSig2 signature for the currently available private key stored in the Satochip.
@@ -1546,12 +1562,11 @@ class CardConnector:
         ins = 0x7F
         p1 = keynbr
 
-
-        # OP_INIT
+        # OP_INIT: send encrypted_secnonce
         p2 = JCconstants.OP_INIT
 
-        # data: [secnonce(128b)]
-        assert len(secnonce) == 128
+        # data: [secnonce(144)]
+        assert len(secnonce) == 144
         data = list(secnonce)
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
@@ -1561,7 +1576,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         print(f"DEBUG OP_INIT sw12: {hex(256*sw1+sw2)}")
 
-        # OP_FINALIZE
+        # OP_FINALIZE: send data for signing
         p2 = JCconstants.OP_FINALIZE
 
         # data: [ b(32b)| ea(32b) | R_evenness(1b) | ggacc(1b) ]
@@ -1583,8 +1598,10 @@ class CardConnector:
         print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
 
         # send apdu
-        response, sw1, sw2 = self.card_transmit(apdu)
-        return response, sw1, sw2
+        psig, sw1, sw2 = self.card_transmit(apdu)
+        print(f"DEBUG OP_FINALIZE sw12: {hex(256 * sw1 + sw2)}")
+
+        return psig
 
 
     ###########################################

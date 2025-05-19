@@ -1224,9 +1224,9 @@ def satochip_musig2_generate_nonce(keyslot):
         #msg = None
         extra = bytes.fromhex("0808080808080808080808080808080808080808080808080808080808080808")
 
-        response, sw1, sw2 = cc.card_musig2_generate_nonce(keynbr=int(keyslot), aggpk=aggpk, msg=msg, extra=extra)
-        print(f"sw12: {hex(256*sw1+sw2)}")
-        print(f"response: {bytes(response).hex()}")
+        pubnonce, encrypted_secnonce = cc.card_musig2_generate_nonce(keynbr=int(keyslot), aggpk=aggpk, msg=msg, extra=extra)
+        print(f"pubnonce: {bytes(pubnonce).hex()}")
+        print(f"encrypted_secnonce: {bytes(encrypted_secnonce).hex()}")
 
         # "expected_secnonce": "B114E502BEAA4E301DD08A50264172C84E41650E6CB726B410C0694D59EFFB6495B5CAF28D045B973D63E3C99A44B807BDE375FD6CB39E46DC4A511708D0E9D2024D4B6CD1361032CA9BD2AEB9D900AA4D45D9EAD80AC9423374C451A7254D0766",
         # "expected_pubnonce": "02F7BE7089E8376EB355272368766B17E88E7DB72047D05E56AA881EA52B3B35DF02C29C8046FDD0DED4C7E55869137200FBDBFE2EB654267B6D7013602CAED3115A"
@@ -1256,7 +1256,11 @@ def satochip_musig2_sign_hash(keyslot):
 
         # test vector
         secnonce = bytes.fromhex("508B81A611F100A6B2B6B29656590898AF488BCF2E1F55CF22E5CFB84421FE61FA27FD49B1D50085B481285E1CA205D55C82CC1B31FF5CD54A489829355901F703935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9")
-        secnonce = secnonce + (128-len(secnonce))*bytes.fromhex("00") # pad to reach 128 bytes
+
+        # encrypted secnonce from generate_nonce()
+        secnonce= bytes.fromhex("f51813aab1b4ea2d3c87d39425f923436eceefa6e045c7509055f9a46430848f7f0e6d1f9c7ce68afc8b7ed5140b9070501c6811b4e12e25218d8d0a3cc0e09ad36d4cb609c9fc63c25d2033af206ccc459adf56576dca3b340b5d533d56b9835e641a95b86eae32206f0431329994e3e83c36c6755cca8483ff7cc5460cd826c0e32b71ab84e0efcd6be667a2f8eee0")
+
+        secnonce = secnonce + (144-len(secnonce))*bytes.fromhex("00") # pad to reach 144 bytes
         #secnonce = 128 * bytes.fromhex("00")  # pad to reach 128 bytes
 
         b = bytes.fromhex("f6311d2583176bb178ec12973b760a2d733544d4c72b4b3a8c260f7679f7d9c6")
@@ -1264,9 +1268,8 @@ def satochip_musig2_sign_hash(keyslot):
         r_has_even_y = False
         ggacc_is_1 = True
 
-        response, sw1, sw2 = cc.card_musig2_sign_hash(keynbr=int(keyslot), secnonce=secnonce, b=b, ea=ea, r_has_even_y=r_has_even_y, ggacc_is_1=ggacc_is_1)
-        print(f"sw12: {hex(256*sw1+sw2)}")
-        print(f"response: {bytes(response).hex()}")
+        psig = cc.card_musig2_sign_hash(keynbr=int(keyslot), secnonce=secnonce, b=b, ea=ea, r_has_even_y=r_has_even_y, ggacc_is_1=ggacc_is_1)
+        print(f"psig: {bytes(psig).hex()}")
 
         print(f"psig expected: 012ABBCB52B3016AC03AD82395A1A415C48B93DEF78718E62A7A90052FE224FB")
 
