@@ -1201,7 +1201,11 @@ def satochip_sign_message(message, keyslot, path):
 
 @main.command()
 @click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
-def satochip_musig2_generate_nonce(keyslot):
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
+@click.option("--message", required=False, help="The message to sign as 0-32 bytes hex string")
+@click.option("--aggpk", required=False, help="The aggregated pubkey as 32-byte hex string")
+@click.option("--extra", required=False, help="Extra data as 0-32 bytes hex string")
+def satochip_musig2_generate_nonce(keyslot, path, message, aggpk, extra):
 
     try:
         # get PIN from environment variable or interactively
@@ -1211,6 +1215,13 @@ def satochip_musig2_generate_nonce(keyslot):
         else:
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
+
+        # derive key
+        keyslot = int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath) = cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
 
         # setup satochip using python3 -B satochip_cli.py common-initial-setup
         # first import test privkey "0202020202020202020202020202020202020202020202020202020202020202" in keyslot 1
@@ -1218,18 +1229,24 @@ def satochip_musig2_generate_nonce(keyslot):
         # corresponding pubkey is 024D4B6CD1361032CA9BD2AEB9D900AA4D45D9EAD80AC9423374C451A7254D0766
         # using python3 -B satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 1
 
-        aggpk = bytes.fromhex("0707070707070707070707070707070707070707070707070707070707070707")
-        msg = bytes.fromhex("0101010101010101010101010101010101010101010101010101010101010101")
+        #aggpk = bytes.fromhex("0707070707070707070707070707070707070707070707070707070707070707")
+        #msg = bytes.fromhex("0101010101010101010101010101010101010101010101010101010101010101")
         #msg = bytes.fromhex("")
         #msg = None
-        extra = bytes.fromhex("0808080808080808080808080808080808080808080808080808080808080808")
-
-        pubnonce, encrypted_secnonce = cc.card_musig2_generate_nonce(keynbr=int(keyslot), aggpk=aggpk, msg=msg, extra=extra)
-        print(f"pubnonce: {bytes(pubnonce).hex()}")
-        print(f"encrypted_secnonce: {bytes(encrypted_secnonce).hex()}")
-
+        #extra = bytes.fromhex("0808080808080808080808080808080808080808080808080808080808080808")
         # "expected_secnonce": "B114E502BEAA4E301DD08A50264172C84E41650E6CB726B410C0694D59EFFB6495B5CAF28D045B973D63E3C99A44B807BDE375FD6CB39E46DC4A511708D0E9D2024D4B6CD1361032CA9BD2AEB9D900AA4D45D9EAD80AC9423374C451A7254D0766",
         # "expected_pubnonce": "02F7BE7089E8376EB355272368766B17E88E7DB72047D05E56AA881EA52B3B35DF02C29C8046FDD0DED4C7E55869137200FBDBFE2EB654267B6D7013602CAED3115A"
+
+        if aggpk is not None:
+            aggpk = bytes.fromhex(aggpk)
+        if message is not None:
+            message = bytes.fromhex(message)
+        if extra is not None:
+            extra = bytes.fromhex(extra)
+
+        pubnonce, encrypted_secnonce = cc.card_musig2_generate_nonce(keynbr=keyslot, aggpk=aggpk, msg=message, extra=extra)
+        print(f"pubnonce: {pubnonce.hex()}")
+        print(f"encrypted_secnonce: {encrypted_secnonce.hex()}")
 
     except Exception as e:
         print(e)
@@ -1237,7 +1254,13 @@ def satochip_musig2_generate_nonce(keyslot):
 
 @main.command()
 @click.option("--keyslot", default="255", help="keyslot of the private key (for single-key wallet")
-def satochip_musig2_sign_hash(keyslot):
+@click.option("--path", default="m/44'/0'/0'/0/0", help="path: the full BIP32 path of the address")
+@click.option("--secnonce", required=True, help="The encrypted secnonce as 144 bytes hex string")
+@click.option("--b", required=True, help="The b value as 32 bytes hex string")
+@click.option("--ea", required=True, help="The e*a as 32-byte hex string")
+@click.option("--r_has_even_y", required=True, help="has_even_y(R) as true or false")
+@click.option("--ggacc_is_1", required=True, help="true if g*gacc is equal to 1, false otherwise")
+def satochip_musig2_sign_hash(keyslot, path, secnonce, b, ea, r_has_even_y, ggacc_is_1):
 
     try:
         # get PIN from environment variable or interactively
@@ -1248,30 +1271,39 @@ def satochip_musig2_sign_hash(keyslot):
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
+        # derive key
+        keyslot = int(keyslot)
+        if keyslot == 0xFF:
+            # 0xFF is for extended key, used if no keyslot is provided
+            (depth, bytepath) = cc.parser.bip32path2bytes(path)
+            (pubkey, chaincode) = cc.card_bip32_get_extendedkey(bytepath)
+
+        # test vector
         # setup satochip using python3 -B satochip_cli.py common-initial-setup
         # first import test privkey 7fb9e0e687ada1eebf7ecfe2f21e73ebdb51a7d450948dfe8d76d7f2d1007671 in keyslot
         # using python3 -B satochip_cli.py satochip-import-privkey --keyslot 0 --privkey 7fb9e0e687ada1eebf7ecfe2f21e73ebdb51a7d450948dfe8d76d7f2d1007671
         # corresponding pubkey is 03935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9
         # using python3 -B satochip_cli.py satochip-get-pubkey-from-keyslot --keyslot 0
 
-        # test vector
-        secnonce = bytes.fromhex("508B81A611F100A6B2B6B29656590898AF488BCF2E1F55CF22E5CFB84421FE61FA27FD49B1D50085B481285E1CA205D55C82CC1B31FF5CD54A489829355901F703935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9")
+        #secnonce = bytes.fromhex("508B81A611F100A6B2B6B29656590898AF488BCF2E1F55CF22E5CFB84421FE61FA27FD49B1D50085B481285E1CA205D55C82CC1B31FF5CD54A489829355901F703935F972DA013F80AE011890FA89B67A27B7BE6CCB24D3274D18B2D4067F261A9")
+        # b = bytes.fromhex("f6311d2583176bb178ec12973b760a2d733544d4c72b4b3a8c260f7679f7d9c6")
+        # ea = bytes.fromhex("f696bb3be7fc4ee399c173813d0bddded1471cfe8acf5f729b1610d489eb3600")
+        # r_has_even_y = False
+        # ggacc_is_1 = True
+        # psig_expected = "012ABBCB52B3016AC03AD82395A1A415C48B93DEF78718E62A7A90052FE224FB"
 
-        # encrypted secnonce from generate_nonce()
-        secnonce= bytes.fromhex("f51813aab1b4ea2d3c87d39425f923436eceefa6e045c7509055f9a46430848f7f0e6d1f9c7ce68afc8b7ed5140b9070501c6811b4e12e25218d8d0a3cc0e09ad36d4cb609c9fc63c25d2033af206ccc459adf56576dca3b340b5d533d56b9835e641a95b86eae32206f0431329994e3e83c36c6755cca8483ff7cc5460cd826c0e32b71ab84e0efcd6be667a2f8eee0")
+        secnonce = bytes.fromhex(secnonce)
+        secnonce = secnonce + (144 - len(secnonce)) * bytes.fromhex("00")  # pad to reach 144 bytes
 
-        secnonce = secnonce + (144-len(secnonce))*bytes.fromhex("00") # pad to reach 144 bytes
-        #secnonce = 128 * bytes.fromhex("00")  # pad to reach 128 bytes
+        b = bytes.fromhex(b)
+        ea = bytes.fromhex(ea)
+        r_has_even_y = (r_has_even_y.lower() == "true")
+        print(f"r_has_even_y: {r_has_even_y}")
+        ggacc_is_1 = (ggacc_is_1.lower() == "true")
+        print(f"ggacc_is_1: {ggacc_is_1}")
 
-        b = bytes.fromhex("f6311d2583176bb178ec12973b760a2d733544d4c72b4b3a8c260f7679f7d9c6")
-        ea = bytes.fromhex("f696bb3be7fc4ee399c173813d0bddded1471cfe8acf5f729b1610d489eb3600")
-        r_has_even_y = False
-        ggacc_is_1 = True
-
-        psig = cc.card_musig2_sign_hash(keynbr=int(keyslot), secnonce=secnonce, b=b, ea=ea, r_has_even_y=r_has_even_y, ggacc_is_1=ggacc_is_1)
-        print(f"psig: {bytes(psig).hex()}")
-
-        print(f"psig expected: 012ABBCB52B3016AC03AD82395A1A415C48B93DEF78718E62A7A90052FE224FB")
+        psig = cc.card_musig2_sign_hash(keynbr=keyslot, secnonce=secnonce, b=b, ea=ea, r_has_even_y=r_has_even_y, ggacc_is_1=ggacc_is_1)
+        print(f"psig: {psig.hex()}")
 
     except Exception as e:
         print(e)

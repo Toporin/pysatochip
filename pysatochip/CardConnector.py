@@ -1524,9 +1524,10 @@ class CardConnector:
         print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
 
         # send apdu
-        pubnonce, sw1, sw2 = self.card_transmit(apdu)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        pubnonce = bytes(response)
         print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
-        print(f"DEBUG pubnonce: {bytes(pubnonce).hex()}")
+        print(f"DEBUG pubnonce: {pubnonce.hex()}")
 
         # OP_FINALIZE: recover encrypted_secnonce
         p2 = JCconstants.OP_FINALIZE
@@ -1536,9 +1537,10 @@ class CardConnector:
         print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
 
         # send apdu
-        encrypted_secnonce, sw1, sw2 = self.card_transmit(apdu)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        encrypted_secnonce = bytes(response)
         print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
-        print(f"DEBUG encrypted_secnonce: {bytes(encrypted_secnonce).hex()}")
+        print(f"DEBUG encrypted_secnonce: {encrypted_secnonce.hex()}")
 
         return pubnonce, encrypted_secnonce
 
@@ -1598,7 +1600,8 @@ class CardConnector:
         print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
 
         # send apdu
-        psig, sw1, sw2 = self.card_transmit(apdu)
+        response, sw1, sw2 = self.card_transmit(apdu)
+        psig = bytes(response)
         print(f"DEBUG OP_FINALIZE sw12: {hex(256 * sw1 + sw2)}")
 
         return psig
