@@ -564,6 +564,31 @@ def common_export_perso_certificate():
         print(e)
 
 @main.command()
+@click.option("--privkey", default=None, help="The device NDEF authentikey to import (hex encoded)")
+def common_import_ndef_authentikey(privkey):
+    """Import the NDEF authentikey privkey on the card."""
+    try:
+        print(f"cardtype: {cc.card_type}")
+
+        # PIN required except for satodime
+        if cc.card_type != "Satodime":
+            # get PIN from environment variable or interactively
+            if 'PYSATOCHIP_PIN' in environ:
+                pin= environ.get('PYSATOCHIP_PIN')
+                print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+            else:
+                pin = getpass("Enter your PIN:")
+            cc.card_verify_PIN(pin)
+
+        privkey_bytes = bytes.fromhex(privkey)
+        response, sw1, sw2 = cc.card_import_ndef_authentikey(privkey_bytes)
+
+        print(f"response: {hex(sw1*256+sw2)}")
+
+    except Exception as e:
+        print(e)
+
+@main.command()
 def common_verify_authenticity():
     if cc.card_get_status()[3]['setup_done'] == False:
         print("Unable to perform this function until setup is complete")

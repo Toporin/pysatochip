@@ -3305,7 +3305,22 @@ class CardConnector:
         # parse and return raw certificate
         self.cert_pem= self.parser.convert_bytes_to_string_pem(certificate)
         return self.cert_pem
-    
+
+    def card_import_ndef_authentikey(self, ndef_authentikey_bytes: bytes):
+        logger.debug("In card_import_ndef_authentikey")
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_IMPORT_PKI_NDEF_AUTHENTIKEY
+        p1 = 0x00
+        p2 = 0x00
+
+        if len(ndef_authentikey_bytes) != 32:
+           raise Exception(f"Error in card_import_ndef_authentikey: wrong privkey length {len(ndef_authentikey_bytes)} instead of {32}")
+
+        apdu=[cla, ins, p1, p2, len(ndef_authentikey_bytes)] + list(ndef_authentikey_bytes)
+        response, sw1, sw2 = self.card_transmit(apdu)
+
+        return response, sw1, sw2
+
     def card_challenge_response_pki(self, pubkey):
         logger.debug("In card_challenge_response_pki")
         cla= JCconstants.CardEdge_CLA
