@@ -346,7 +346,7 @@ class CardConnector:
                 pass
         
         # no suitable card found
-        raise CardSelectError("CardSelect error", ins=0xA4)
+        raise CardSelectError("No suitable card found", ins=0xA4)
           
     def card_select_satochip(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
