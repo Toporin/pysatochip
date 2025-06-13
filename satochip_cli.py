@@ -1429,6 +1429,10 @@ def common_reset_factory():
             print("Satochip below version v0.12-0.4 do not support factory reset!")
             return
 
+    elif cc.card_type == "Satocash":
+        # satocash only supports factory reset v2
+        common_reset_factory_new()
+
     else:
         print(f"Unsupported card type: {cc.card_type}")
         return
