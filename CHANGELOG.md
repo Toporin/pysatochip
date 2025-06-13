@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0]: 
+
+### Satocash support
+
+Supported commands:
+* satocash_get_status(self)
+* satocash_import_mint(self, url: str)
+* satocash_export_mint(self, index: int)
+* satocash_remove_mint(self, index: int)
+* satocash_import_keyset(self, keyset_id: bytes, mint_index: int, unit: int)
+* satocash_export_keysets(self, index_list: list[int])
+* satocash_remove_keyset(self, index: int)
+* satocash_import_proof(self, keyset_index: int, amount_exponent: int, secret_bytes: bytes, unblinded_key_bytes: bytes)
+* satocash_export_proofs(self, index_list: list[int])
+* satocash_get_proof_info(self, unit: int, info_type: int, index_start: int, index_size: int)
+
+### NDEF authentikey support
+
+PKI: add support for card_import_ndef_authentikey() APDU command
+This command imports the NDEF authentikey private key into the card (if supported).
+This is used to sign and authenticate NDEF record exchanged by tapping the card on a smartphone.
+The NDEF authentikey may be shared by multiple devices for better privacy.
+
+## [0.16.0]: 
+
+### add support for MuSig2 (WIP)
+
+* Add test class for musig2 (requires modified Satochip firmware)
+* Generic CLI commands for MuSig2
+* Encrypted secnonce: secnonce are exported in encrypted & authenticated format to reduce memory footprint
+* Implementation using test vectors from bip327 specification
+* Supported commands:
+  * card_musig2_generate_nonce(self, keynbr: int, aggpk: Optional[bytes], msg: Optional[bytes], extra: Optional[bytes])
+  * card_musig2_sign_hash(self, keynbr: int, secnonce: bytes, b: bytes, ea: bytes, r_has_even_y: bool, ggacc_is_1: bool)
+
 ## [0.15.5]:
 
 * Add support for Liquid-Bitcoin Master Blinding Key export 
