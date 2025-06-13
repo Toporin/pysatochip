@@ -57,3 +57,34 @@ python3 satochip_cli.py --verbose satochip-import-unencrypted-mnemonic
 python3 satochip_cli.py --verbose satochip-sign-nostr-event --path "m/44'/0'/0'/0/0" --message "Hello, world" --kind 1 --broadcast
 ```
 
+## Satocash operations 
+
+* setup card (once):
+
+```commandline
+python3 satochip_cli.py --verbose common-initial-setup --label "my label"
+```
+
+* Get status:
+
+```commandline
+python3 satochip_cli.py --verbose satocash-get-status
+```
+
+* Get balance:
+
+```commandline
+python3 satochip_cli.py --verbose satocash-get-balances --unit "sat"
+```
+
+* Import token v4:
+
+```commandline
+python3 satochip_cli.py --verbose satocash-import-tokenv4 --tokenv4 "..."
+```
+
+* Export token v4:
+
+```commandline
+python3 satochip_cli.py --verbose satocash-export-tokenv4 --unit "sat" --amount "10"
+```

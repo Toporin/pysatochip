@@ -9,8 +9,9 @@
 # v0.11: support for (mandatory) secure channel
 # v0.12: card label & support for encrypted seed import from SeedKeeper
 # v0.14: Schnorr signatures, nostr event signatures, Liquid-Bitcoin support (export Master Blinding Key)
+# v0.15: support for MuSig2 (WIP)
 SATOCHIP_PROTOCOL_MAJOR_VERSION=0
-SATOCHIP_PROTOCOL_MINOR_VERSION=14
+SATOCHIP_PROTOCOL_MINOR_VERSION=15
 SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCOL_MINOR_VERSION
 
 # SeedKeeper supported version tuple
@@ -25,6 +26,12 @@ SEEDKEEPER_PROTOCOL_VERSION= (SEEDKEEPER_PROTOCOL_MAJOR_VERSION<<8)+SEEDKEEPER_P
 SATODIME_PROTOCOL_MAJOR_VERSION=0
 SATODIME_PROTOCOL_MINOR_VERSION=1
 SATODIME_PROTOCOL_VERSION= (SATODIME_PROTOCOL_MAJOR_VERSION<<8)+SATODIME_PROTOCOL_MINOR_VERSION
+
+# Satocash supported version tuple
+# v 0.1: initial version
+SATOCASH_PROTOCOL_MAJOR_VERSION=0
+SATOCASH_PROTOCOL_MINOR_VERSION=1
+SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCOL_MINOR_VERSION
 
 # PYSATOCHIP version
 # v0.11.a: initial version
@@ -43,7 +50,9 @@ SATODIME_PROTOCOL_VERSION= (SATODIME_PROTOCOL_MAJOR_VERSION<<8)+SATODIME_PROTOCO
 # v0.15.3: add support for Schnorr signatures & single-key wallet in Satochip
 # v0.15.4: add support for Nostr event signature
 # v0.15.5: add support for Liquid-Bitcoin Master Blinding Key export + Enable/disable optional features.
+# v0.16.0: add support for MuSig2 (WIP)
+# v0.17.0: add support for Satocash + NDEF authentikey (WIP)
 PYSATOCHIP_MAJOR_VERSION= 0
-PYSATOCHIP_MINOR_VERSION= 15
-PYSATOCHIP_REVISION= 5
+PYSATOCHIP_MINOR_VERSION= 17
+PYSATOCHIP_REVISION= 0
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

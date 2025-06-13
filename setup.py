@@ -35,7 +35,7 @@ setuptools.setup(
     },
     install_requires=requirements,
     extras_require={
-        "CLI": ["mnemonic", "click", "websockets", "nostr"],
+        "CLI": ["mnemonic", "click", "websockets", "nostr", "cbor2"],
     },
     packages=setuptools.find_packages(),
     package_dir={

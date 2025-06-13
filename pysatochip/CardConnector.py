@@ -19,7 +19,7 @@ import hmac
 import base64
 import logging
 from os import urandom
-from typing import Union
+from typing import Union, List, Optional
 
 #debug
 # import sys
@@ -168,6 +168,7 @@ class CardConnector:
     SATOCHIP_AID= [0x53,0x61,0x74,0x6f,0x43,0x68,0x69,0x70] #SatoChip
     SEEDKEEPER_AID= [0x53,0x65,0x65,0x64,0x4b,0x65,0x65,0x70,0x65,0x72]  #SeedKeeper
     SATODIME_AID= [0x53, 0x61, 0x74, 0x6f, 0x44, 0x69, 0x6d, 0x65] #SatoDime
+    SATOCASH_AID= [0x53, 0x61, 0x74, 0x6f, 0x63, 0x61, 0x73, 0x68] # Satocash
     
     def __init__(self, client=None, loglevel= logging.WARNING, card_filter=None):
         logger.setLevel(loglevel)
@@ -181,6 +182,7 @@ class CardConnector:
         self.cardtype = AnyCardType() #TODO: specify ATR to ignore connection to wrong card types?
         self.needs_2FA = None
         self.is_seeded= None
+        self.needsPIN = None # Satocash
         self.setup_done= None
         self.needs_secure_channel= None
         self.mode_factory_reset = False # set to True when performing factory reset
@@ -325,7 +327,7 @@ class CardConnector:
        
         # if no filter, try all supported applet in this order
         if (self.card_filter==None):
-            self.card_filter= ["satochip", "seedkeeper", "satodime"]
+            self.card_filter= ["satochip", "seedkeeper", "satodime", "satocash"]
         elif isinstance(self.card_filter, str):
             self.card_filter= [self.card_filter]
         
@@ -338,11 +340,13 @@ class CardConnector:
                     return self.card_select_seedkeeper()
                 elif (card_applet=="satodime"):
                     return self.card_select_satodime()
+                elif (card_applet=="satocash"):
+                    return self.card_select_satocash()
             except CardSelectError as ex:
                 pass
         
         # no suitable card found
-        raise CardSelectError("CardSelect error", ins=0xA4)
+        raise CardSelectError("No suitable card found", ins=0xA4)
           
     def card_select_satochip(self):
         apdu = CardConnector.SELECT + [len(CardConnector.SATOCHIP_AID)] + CardConnector.SATOCHIP_AID
@@ -369,6 +373,15 @@ class CardConnector:
             raise CardSelectError("CardSelect error", ins=0xA4)
         self.card_type="Satodime"
         logger.debug("Found a Satodime!")
+        return (response, sw1, sw2)
+
+    def card_select_satocash(self):
+        apdu = CardConnector.SELECT + [len(CardConnector.SATOCASH_AID)] + CardConnector.SATOCASH_AID
+        (response, sw1, sw2) = self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            raise CardSelectError("CardSelect error", ins=0xA4)
+        self.card_type="Satocash"
+        logger.debug("Found a Satocash!")
         return (response, sw1, sw2)
 
     def card_get_status(self):
@@ -1469,6 +1482,130 @@ class CardConnector:
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         return response, sw1, sw2
+
+    def card_musig2_generate_nonce(self, keynbr: int, aggpk: Optional[bytes], msg: Optional[bytes], extra: Optional[bytes]):
+        '''This function generate a MuSig2 nonce for the currently available private key stored in the Satochip.
+        Generation is based on the BIP-0327 specification: https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki.
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        aggpk (list): the x-only aggregate public key
+        msg (list): the message (should be 127-bytes or less)
+        extra_bytes (list): auxiliary input (should be 127-bytes or less)
+
+        returns: pubnonce, encrypted_sec_nonce
+        '''
+        logger.debug("in card_musig2_generate_nonce")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7E
+        p1 = keynbr
+
+        # OP_INIT: recover pubnonce
+        p2 = JCconstants.OP_INIT
+
+        # data: [aggpk_size(1b) | aggpk | msg_size (1b) | msg | extra_size(1b) | extra_bytes]
+        data = []
+        if aggpk is None:
+            data += [0x00]
+        else:
+            data += [len(aggpk)] + list(aggpk)
+        if msg is None:
+            data += [0xff]
+        else:
+            data += [len(msg)] + list(msg)
+        if extra is None:
+            data += [0x00]
+        else:
+            data += [len(extra)] + list(extra)
+        #data = [len(aggpk)] + list(aggpk) + [len(msg)] + list(msg) + [len(extra)] + list(extra)
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        pubnonce = bytes(response)
+        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
+        print(f"DEBUG pubnonce: {pubnonce.hex()}")
+
+        # OP_FINALIZE: recover encrypted_secnonce
+        p2 = JCconstants.OP_FINALIZE
+        data = []
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        encrypted_secnonce = bytes(response)
+        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
+        print(f"DEBUG encrypted_secnonce: {encrypted_secnonce.hex()}")
+
+        return pubnonce, encrypted_secnonce
+
+    def card_musig2_sign_hash(self, keynbr: int, secnonce: bytes, b: bytes, ea: bytes, r_has_even_y: bool, ggacc_is_1: bool):
+        '''This function generate a MuSig2 signature for the currently available private key stored in the Satochip.
+        The signature is computed based on secnonce and intermediate values b, ea, R_evenness and ggac.
+        Signature is based on the BIP-0327 specification: https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki.
+
+        Parameters:
+        keynbr (int): the key to use (0xFF for bip32 key)
+        secnonce (bytes):
+        ea (bytes):
+        b (bytes):
+
+        returns:
+        (response, sw1, sw2)
+        '''
+        logger.debug("in card_musig2_sign_hash")
+
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x7F
+        p1 = keynbr
+
+        # OP_INIT: send encrypted_secnonce
+        p2 = JCconstants.OP_INIT
+
+        # data: [secnonce(144)]
+        assert len(secnonce) == 144
+        data = list(secnonce)
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        print(f"DEBUG OP_INIT sw12: {hex(256*sw1+sw2)}")
+
+        # OP_FINALIZE: send data for signing
+        p2 = JCconstants.OP_FINALIZE
+
+        # data: [ b(32b)| ea(32b) | R_evenness(1b) | ggacc(1b) ]
+        assert len(b) == 32
+        assert len(ea) == 32
+        data = list(b)
+        data += list(ea)
+        if r_has_even_y:
+            data += [0x00]
+        else:
+            data += [0x01]
+        if ggacc_is_1:
+            data += [0x01]
+        else:
+            data += [0x00]
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
+
+        # send apdu
+        response, sw1, sw2 = self.card_transmit(apdu)
+        psig = bytes(response)
+        print(f"DEBUG OP_FINALIZE sw12: {hex(256 * sw1 + sw2)}")
+
+        return psig
+
 
     ###########################################
     #              2FA commands               #
@@ -2650,7 +2787,402 @@ class CardConnector:
         header_list= id + [itype, origin, export] + export_counters + fingerprint + rfu + [label_size] + label_list
         header_hex= bytes(header_list).hex()
         return header_hex
-    
+
+    #################################
+    #            SATOCASH           #
+    #################################
+
+    def satocash_get_status(self):
+        logger.debug("In card_get_status")
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB0
+        p1 = 0x00
+        p2 = 0x00
+        apdu = [cla, ins, p1, p2]
+        (response, sw1, sw2) = self.card_transmit(apdu)  # todo: try/except if setup not done
+        d = {}
+        if (sw1 == 0x90) and (sw2 == 0x00):
+            # card applet version
+            d["protocol_major_version"] = response[0]
+            d["protocol_minor_version"] = response[1]
+            d["applet_major_version"] = response[2]
+            d["applet_minor_version"] = response[3]
+            d["protocol_version"] = (d["protocol_major_version"] << 8) + d["protocol_minor_version"]
+            self.protocol_version = d["protocol_version"]  # cache version
+            # PIN/PUK status
+            if len(response) >= 8:
+                d["PIN0_remaining_tries"] = response[4]
+                d["PUK0_remaining_tries"] = response[5]
+                d["PIN1_remaining_tries"] = response[6]
+                d["PUK1_remaining_tries"] = response[7]
+                self.needs_2FA = d["needs2FA"] = False  # default value
+            # 2FA status
+            if len(response) >= 9:
+                self.needs_2FA = d["needs2FA"] = False if response[8] == 0X00 else True
+            # needsPIN (satocash)
+            if len(response) >= 10:
+                self.is_seeded = d["needs_pin"] = False if response[9] == 0X00 else True
+            # setup status
+            if len(response) >= 11:
+                self.setup_done = d["setup_done"] = False if response[10] == 0X00 else True
+            else:
+                self.setup_done = d["setup_done"] = True
+                # secure channel status
+            if len(response) >= 12:
+                self.needs_secure_channel = d["needs_secure_channel"] = False if response[11] == 0X00 else True
+            else:
+                self.needs_secure_channel = d["needs_secure_channel"] = False
+            # NFC policy
+            if len(response) >= 13:
+                self.nfc_policy = d["nfc_policy"] = response[12]  # 0:NFC_ENABLED, 1:NFC_DISABLED, 2:NFC_BLOCKED
+            else:
+                self.nfc_policy = d["nfc_policy"] = 0x00  # NFC_ENABLED by default
+            # pin policy
+            self.pin_policy = d["pin_policy"] = response[13]
+            # RFU policy
+            self.rfu_policy = d["rfu_policy"] = response[14]
+            # satocash settings
+            self.satocash_max_nb_mints = d["max_nb_mints"] = response[15]
+            self.satocash_nb_mints = d["nb_mints"] = response[16]
+            self.satocash_max_nb_keysets = d["max_nb_keysets"] = response[17]
+            self.satocash_nb_keysets = d["nb_keysets"] = response[18]
+            self.satocash_max_nb_proofs = d["max_nb_proofs"] = (response[19]<<8) + response[20]
+            self.satocash_nb_unspent_proofs = d["nb_unspent_proofs"] = (response[21]<<8) + response[22]
+            self.satocash_nb_spent_proofs = d["nb_spent_proofs"] = (response[23] << 8) + response[24]
+            self.satocash_nb_proofs = d["nb_proofs"] = self.satocash_nb_unspent_proofs + self.satocash_nb_spent_proofs
+
+        else:
+            logger.warning(f"Unexpected error in get_status() (error code {hex(256 * sw1 + sw2)})")
+            # raise RuntimeError(f"Unknown error in get_status() (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_get_status: {hex(256*sw1+sw2)}", sw1, sw2)
+
+        return response, sw1, sw2, d
+
+    def satocash_import_mint(self, url: str):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB1
+        p1 = 0x00
+        p2 = 0x00
+
+        url_bytes = url.encode('utf-8')
+        url_list = list(url_bytes)
+
+        data = [len(url_list)] + url_list
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+            index = response[0]
+            return response, sw1, sw2, index
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x9c and sw2==0x01:
+            raise CardMemoryError()
+        elif sw1==0x67 and sw2==0x00:
+            raise CardWrongLengthError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardInvalidParameter()
+        elif sw1==0x9C and sw2==0x60:
+            raise CardObjectAlreadyPresentError()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_import_mint: {hex(256*sw1+sw2)}", sw1, sw2)
+
+
+    def satocash_export_mint(self, index: int):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB2
+        p1 = index
+        p2 = 0x00
+
+        apdu = [cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+            url_size = response[0]
+            url_bytes = bytes(response[1:(url_size+1)])
+            try:
+                url = url_bytes.decode("utf-8")
+            except Exception as ex:
+                url = url_bytes.hex()
+            return response, sw1, sw2, url
+
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardIncorrectP1()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_export_mint: {hex(256*sw1+sw2)}", sw1, sw2)
+
+    def satocash_remove_mint(self, index: int):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB3
+        p1 = index
+        p2 = 0x00
+
+        apdu = [cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+            return response, sw1, sw2
+
+        # 9C06 SW_UNAUTHORIZED , 9C10 SW_INCORRECT_P1, 9C03 SW_OPERATION_NOT_ALLOWED
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardIncorrectP1()
+        elif sw1==0x9c and sw2==0x03:
+            raise CardOperationNotAllowed()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_remove_mint: {hex(256*sw1+sw2)}", sw1, sw2)
+
+
+    def satocash_import_keyset(self, keyset_id: bytes, mint_index: int, unit: int):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB4
+        p1 = 0x00
+        p2 = 0x00
+
+        data = list(keyset_id) + [mint_index] + [unit]
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+            index = response[0]
+            return response, sw1, sw2, index
+
+        # 9C06 SW_UNAUTHORIZED , 9C01 SW_NO_MEMORY_LEFT , 6700 SW_WRONG_LENGTH , 9C0F SW_INVALID_PARAMETER
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x9c and sw2==0x01:
+            raise CardMemoryError()
+        elif sw1==0x67 and sw2==0x00:
+            raise CardWrongLengthError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardInvalidParameter()
+        elif sw1==0x9C and sw2==0x60:
+            raise CardObjectAlreadyPresentError()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_import_keyset: {hex(256*sw1+sw2)}", sw1, sw2)
+
+
+    def satocash_export_keysets(self, index_list: list[int]):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB5
+        p1 = 0x00
+        p2 = 0x00
+
+        data = [len(index_list)]
+        for index in index_list:
+            data += [(index>>8), (index%256)]
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+
+            response_size = len(response)
+            if response_size != 11*len(index_list):
+                raise Exception(f"Wrong response length {response_size}, expected {11*len(index_list)}")
+
+            keysets=[]
+            keysets_dic = {}
+            for pos,value in enumerate(index_list):
+                i = pos*11
+                keyset_index = response[i]
+                keyset_id = bytes(response[(i+1):(i+9)])
+                keyset_mint = response[i+9]
+                keyset_unit = response[i+10]
+
+                keysets += [{
+                    'index':keyset_index,
+                    'id': keyset_id,
+                    'mint_index': keyset_mint,
+                    'unit': keyset_unit
+                }]
+
+                keysets_dic[keyset_index] = {
+                    'index':keyset_index,
+                    'id': keyset_id,
+                    'mint_index': keyset_mint,
+                    'unit': keyset_unit
+                }
+
+
+            return response, sw1, sw2, keysets, keysets_dic
+
+        # 9C06 SW_UNAUTHORIZED, 6700 SW_WRONG_LENGTH, 9C0F SW_INVALID_PARAMETER
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x67 and sw2==0x00:
+            raise CardWrongLengthError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardInvalidParameter()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_export_keysets: {hex(256*sw1+sw2)}", sw1, sw2)
+
+    def satocash_remove_keyset(self, index: int):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB6
+        p1 = index
+        p2 = 0x00
+
+        apdu = [cla, ins, p1, p2]
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1==0x90 and sw2==0x00:
+            return response, sw1, sw2
+
+        # 9C06 SW_UNAUTHORIZED , 9C10 SW_INCORRECT_P1, 9C03 SW_OPERATION_NOT_ALLOWED
+        elif sw1==0x9C and sw2==0x06:
+            raise PinRequiredError()
+        elif sw1==0x9c and sw2==0x0F:
+            raise CardIncorrectP1()
+        elif sw1==0x9c and sw2==0x03:
+            raise CardOperationNotAllowed()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_remove_mint: {hex(256*sw1+sw2)}", sw1, sw2)
+
+    def satocash_import_proof(self, keyset_index: int, amount_exponent: int, secret_bytes: bytes, unblinded_key_bytes: bytes):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB7
+        p1 = 0x00
+        p2 = 0x00
+
+        # data: [keyset_index(1b) | amount_exponent(1b) | unblinded_key(33b) | secret(32b)]
+        data = [keyset_index, amount_exponent] + list(unblinded_key_bytes) + list(secret_bytes)
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1 == 0x90 and sw2 == 0x00:
+            index = 256*response[0] + response[1]
+            return response, sw1, sw2, index
+
+        # 9C06 SW_UNAUTHORIZED , 9C01 SW_NO_MEMORY_LEFT , 6700 SW_WRONG_LENGTH , 9C0F SW_INVALID_PARAMETER
+        elif sw1 == 0x9C and sw2 == 0x06:
+            raise PinRequiredError()
+        elif sw1 == 0x9c and sw2 == 0x01:
+            raise CardMemoryError()
+        elif sw1 == 0x67 and sw2 == 0x00:
+            raise CardWrongLengthError()
+        elif sw1 == 0x9c and sw2 == 0x0F:
+            raise CardInvalidParameter()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_import_proof: {hex(256 * sw1 + sw2)}", sw1, sw2)
+
+    def satocash_export_proofs(self, index_list: list[int]):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB8
+        p1 = 0x00
+        p2 = JCconstants.OP_INIT
+
+        #data (OP_INIT): [ proof_index_list_size(1b) | proof_index(2b) ... | 2FA_size(1b) | 2FA ]
+        data = [len(index_list)]
+        for index in index_list:
+            data += [(index>>8), (index%256)]
+
+        # todo: 2FA support
+
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        proofs = []
+
+        def parse_proofs_from_rapdu(response: list[int]):
+            """ response format [proof_index(2b) | proof_state(1b) | keyset_index(1b) | amount_exponent(1b) | unblinded_key(33b) | secret(32b)]"""
+            proof_list = []
+            proof_dic = {}
+            response_size= len(response)
+            pos = 0
+            while pos<response_size:
+                proof_index= response[pos]*256 + response[pos+1]
+                pos+=2
+                proof_state = response[pos]
+                pos+=1
+                keyset_index = response[pos]
+                pos+=1
+                proof_amount_exponent = response[pos]
+                pos+=1
+                unblindex_key_hex = bytes(response[pos:(pos + 33)]).hex()
+                pos += 33
+                proof_secret_hex = bytes(response[pos:(pos+32)]).hex()
+                pos+=32
+
+                dict= {
+                    'index':proof_index,
+                    'state':proof_state,
+                    'keyset_index': keyset_index,
+                    'amount': 2**proof_amount_exponent,
+                    'secret_hex': proof_secret_hex,
+                    'unblinded_key_hex': unblindex_key_hex
+                }
+                proof_list+=[dict]
+                proof_dic[proof_index] = dict
+
+            return proof_list, proof_dic
+
+        # OP_INIT
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1 == 0x90 and sw2 == 0x00:
+            proof_list, proof_dic = parse_proofs_from_rapdu(response)
+            proofs += proof_list
+
+        #9C06 SW_UNAUTHORIZED, 9C11 SW_INCORRECT_P2, 6700 SW_WRONG_LENGTH, 9C0F SW_INVALID_PARAMETER,
+        elif sw1 == 0x9C and sw2 == 0x06:
+            raise PinRequiredError()
+        elif sw1 == 0x9c and sw2 == 0x11:
+            raise CardIncorrectP2()
+        elif sw1 == 0x67 and sw2 == 0x00:
+            raise CardWrongLengthError()
+        elif sw1 == 0x9c and sw2 == 0x0F:
+            raise CardInvalidParameter()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_export_proofs: {hex(256 * sw1 + sw2)}", sw1, sw2)
+
+        # OP_PROCESS
+        p2 = JCconstants.OP_PROCESS
+        while True:
+
+            # check if all proofs have been recovered
+            if len(proofs) == len(index_list):
+                return proofs
+
+            apdu = [cla, ins, p1, p2]
+            response, sw1, sw2 = self.card_transmit(apdu)
+            if sw1 == 0x90 and sw2 == 0x00:
+                proof_list, proof_dic = parse_proofs_from_rapdu(response)
+                proofs += proof_list
+
+            # exceptions (OP_PROCESS): 9C06 SW_UNAUTHORIZED, 9C11 SW_INCORRECT_P2, 9C13 SW_INCORRECT_INITIALIZATION,
+            elif sw1 == 0x9C and sw2 == 0x06:
+                raise PinRequiredError()
+            elif sw1 == 0x9c and sw2 == 0x11:
+                raise CardIncorrectP2()
+            elif sw1 == 0x9c and sw2 == 0x13:
+                raise CardIncorrectInitialization()
+            else:
+                raise UnexpectedSW12Error(f"Unexpected error in satocash_export_proofs: {hex(256 * sw1 + sw2)}", sw1, sw2)
+
+
+    def satocash_get_proof_info(self, unit: int, info_type: int, index_start: int, index_size: int):
+        cla = JCconstants.CardEdge_CLA
+        ins = 0xB9
+        p1 = unit
+        p2 = info_type
+
+        # data: [index_start(2b) | index_size(2b)]
+        data = [(index_start>>8), (index_start%256)] + [(index_size>>8), (index_size%256)]
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        response, sw1, sw2 = self.card_transmit(apdu)
+        if sw1 == 0x90 and sw2 == 0x00:
+            return response, sw1, sw2
+
+        # Exceptions: 9C06 SW_UNAUTHORIZED, 9C0F SW_INVALID_PARAMETER, 6700 SW_WRONG_LENGTH,
+        elif sw1 == 0x9C and sw2 == 0x06:
+            raise PinRequiredError()
+        elif sw1 == 0x9c and sw2 == 0x0F:
+            raise CardInvalidParameter()
+        elif sw1 == 0x67 and sw2 == 0x00:
+            raise CardWrongLengthError()
+        else:
+            raise UnexpectedSW12Error(f"Unexpected error in satocash_get_proof_info: {hex(256 * sw1 + sw2)}", sw1, sw2)
+
     #################################
     #           PERSO PKI           #        
     #################################    
@@ -2773,7 +3305,22 @@ class CardConnector:
         # parse and return raw certificate
         self.cert_pem= self.parser.convert_bytes_to_string_pem(certificate)
         return self.cert_pem
-    
+
+    def card_import_ndef_authentikey(self, ndef_authentikey_bytes: bytes):
+        logger.debug("In card_import_ndef_authentikey")
+        cla = JCconstants.CardEdge_CLA
+        ins = JCconstants.INS_IMPORT_PKI_NDEF_AUTHENTIKEY
+        p1 = 0x00
+        p2 = 0x00
+
+        if len(ndef_authentikey_bytes) != 32:
+           raise Exception(f"Error in card_import_ndef_authentikey: wrong privkey length {len(ndef_authentikey_bytes)} instead of {32}")
+
+        apdu=[cla, ins, p1, p2, len(ndef_authentikey_bytes)] + list(ndef_authentikey_bytes)
+        response, sw1, sw2 = self.card_transmit(apdu)
+
+        return response, sw1, sw2
+
     def card_challenge_response_pki(self, pubkey):
         logger.debug("In card_challenge_response_pki")
         cla= JCconstants.CardEdge_CLA
@@ -3164,11 +3711,11 @@ class CardConnector:
 
 
     #################################
-    #              ERRORS           #        
+    #         CARD  ERRORS          #
     ################################# 
     
 class ApduError(Exception):
-    def __init__(self, message, sw1=0x00, sw2=0x00, ins=0x00, response=[]):            
+    def __init__(self, message, sw1=0x00, sw2=0x00, ins=0x00, response=[]):
         super().__init__(message)
         self.sw1 = sw1
         self.sw2= sw2
@@ -3177,37 +3724,37 @@ class ApduError(Exception):
 
 
 class CardSelectError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x6A, 0x82, ins, response)
 
 # Generic 
 class CardSetupNotDoneError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x04, ins, response)
 
 class IncorrectP1Error(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x10, ins, response)
 
 # Satodime
 class UnknownProtocolMediaError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x54, ins, response)
 
 class IncorrectProtocolMediaError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x53, ins, response)
 
 class IncorrectKeyslotStateError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x52, ins, response)
 
 class IncorrectUnlockCodeError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x51, ins, response)
 
 class IncorrectUnlockCounterError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):            
+    def __init__(self, message, ins=0x00, response=[]):
         super().__init__(message, 0x9c, 0x50, ins, response)
 
 class SecureChannelError(Exception):
@@ -3267,6 +3814,70 @@ class SeedKeeperError(Exception):
     """Raised when an error is returned by the SeedKeeper"""
     pass   
     
+class CardMemoryError(Exception):
+    """Raised when there is not enough memory in the card"""
+    def __init__(self, message="Not enough memory available"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x01
+        self.sw12hex = hex(256 * self.sw1 + self.sw2)
+
+class CardWrongLengthError(Exception):
+    """Raised when data provided to card has not the expected length"""
+    def __init__(self, message="Wrong length error"):
+        super().__init__(message)
+        self.sw1 = 0x67
+        self.sw2 = 0x00
+        self.sw12hex = hex(256*self.sw1 + self.sw2)
+
+class CardInvalidParameter(Exception):
+    """Raised when data provided to card is not valid"""
+    def __init__(self, message="Data provided to card is invalid"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x0f
+        self.sw12hex = hex(256*self.sw1 + self.sw2)
+
+class CardIncorrectP1(Exception):
+    """Raised when APDU P1 parameter provided to card is not valid"""
+    def __init__(self, message="P1 parameter provided to card is invalid"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x10
+        self.sw12hex = hex(256 * self.sw1 + self.sw2)
+
+class CardIncorrectP2(Exception):
+    """Raised when APDU P2 parameter provided to card is not valid"""
+    def __init__(self, message="P2 parameter provided to card is invalid"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x11
+        self.sw12hex = hex(256 * self.sw1 + self.sw2)
+
+class CardOperationNotAllowed(Exception):
+    """Raised when a requested operation is not allowed by the card for various reasons"""
+    def __init__(self, message="Operation is not allowed by the card policy"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x03
+        self.sw12hex = hex(256 * self.sw1 + self.sw2)
+
+class CardIncorrectInitialization(Exception):
+    """Raised when multiple commands for an instruction are not requested in the correct order"""
+    def __init__(self, message="Incorrect initialization of operations"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x13
+        self.sw12hex = hex(256 * self.sw1 + self.sw2)
+
+class CardObjectAlreadyPresentError(Exception):
+    """Raised when object imported to the card is already present"""
+    def __init__(self, message="Imported object is already present"):
+        super().__init__(message)
+        self.sw1 = 0x9c
+        self.sw2 = 0x60
+        self.sw12hex = hex(256*self.sw1 + self.sw2)
+
 
 if __name__ == "__main__":
 
