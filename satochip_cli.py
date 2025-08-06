@@ -15,6 +15,7 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import hashlib
 import traceback
 from getpass import getpass
 from hashlib import sha256
@@ -2378,15 +2379,23 @@ def satocash_get_status():
 def satocash_import_mint(url: str):
     """Import a mint (url) into a Satocash. This is required to import keyset(s), then proof(s)"""
     try:
-        # no pin required for status
+        # get PIN from environment variable or interactively
+        # todo: check pin policy?
+        if 'PYSATOCHIP_PIN' in environ:
+            pin = environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
         response, sw1, sw2, index = cc.satocash_import_mint(url)
         print(f"Mint {url} imported into card at index {index}")
     except Exception as ex:
         print(f"Error during import: {ex}")
 
 @main.command()
-@click.option("--index", help="Index of mint to export")
-def satocash_export_mint(index: str):
+@click.option("--index", help="Index of mint to export", type=int)
+def satocash_export_mint(index: int):
     """Export a mint (url) from a Satocash at a given index"""
     try:
         # get PIN from environment variable or interactively
@@ -2398,15 +2407,14 @@ def satocash_export_mint(index: str):
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
-        index = int(index)
         response, sw1, sw2, url = cc.satocash_export_mint(index)
         print(f"Mint url: {url}")
     except Exception as ex:
         print(f"Error during mint export: {ex}")
 
 @main.command()
-@click.option("--index", help="Index of mint to remove")
-def satocash_remove_mint(index: str):
+@click.option("--index", help="Index of mint to remove", type=int)
+def satocash_remove_mint(index: int):
     """Remove a mint (url) from a Satocash at a given index"""
     try:
         # get PIN from environment variable or interactively
@@ -2418,7 +2426,6 @@ def satocash_remove_mint(index: str):
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
-        index = int(index)
         response, sw1, sw2 = cc.satocash_remove_mint(index)
         print(f"Mint removed from card")
     except Exception as ex:
@@ -2426,9 +2433,9 @@ def satocash_remove_mint(index: str):
 
 @main.command()
 @click.option("--keyset-id", help="Keyset_id as 8-byte hex value")
-@click.option("--mint-index", help="Mint index in satocard")
+@click.option("--mint-index", help="Mint index in satocard", type=int)
 @click.option("--unit", default= "sat", help="Unit representation: sat, msat, USD, EUR")
-def satocash_import_keyset(keyset_id: str, mint_index: str, unit: str):
+def satocash_import_keyset(keyset_id: str, mint_index: int, unit: str):
     """Import a keyset into a Satocash. This is required to import proof(s)"""
     try:
         # get PIN from environment variable or interactively
@@ -2442,7 +2449,6 @@ def satocash_import_keyset(keyset_id: str, mint_index: str, unit: str):
 
         dic_unit = {"sat":1, "msat":2, "USD":3, "EUR":4}
         keyset_id_bytes = bytes.fromhex(keyset_id)
-        mint_index = int(mint_index)
         unit = dic_unit[unit]
 
         response, sw1, sw2, index = cc.satocash_import_keyset(keyset_id_bytes, mint_index, unit)
@@ -2453,7 +2459,7 @@ def satocash_import_keyset(keyset_id: str, mint_index: str, unit: str):
 
 @main.command()
 @click.option("--index-list", help="list of keyset to fetch by index, in the form '1,2,4,6'.")
-def satocash_export_keysets(index_list_str: str):
+def satocash_export_keysets(index_list: str):
     """Export keysets info from a Satocash. Info includes keyset_id, mint_index and unit"""
     try:
         # get PIN from environment variable or interactively
@@ -2467,11 +2473,11 @@ def satocash_export_keysets(index_list_str: str):
 
         # parse list from string
         # Split the string by commas
-        string_values = index_list_str.split(',')
+        string_values = index_list.split(',')
         # Convert each string value to integer, stripping whitespace
         index_list = [int(value.strip()) for value in string_values]
 
-        response, sw1, sw2, keysets = cc.satocash_export_keysets(index_list)
+        response, sw1, sw2, keysets, keysets_dic = cc.satocash_export_keysets(index_list)
         print(f"Keysets: {keysets}")
 
     except Exception as ex:
@@ -2479,8 +2485,8 @@ def satocash_export_keysets(index_list_str: str):
 
 
 @main.command()
-@click.option("--index", help="Index of keyset to remove")
-def satocash_remove_keyset(index: str):
+@click.option("--index", help="Index of keyset to remove", type=int)
+def satocash_remove_keyset(index: int):
     """Remove a keyset from a Satocash at a given index"""
     try:
         # get PIN from environment variable or interactively
@@ -2492,8 +2498,6 @@ def satocash_remove_keyset(index: str):
             pin = getpass("Enter your PIN:")
         cc.card_verify_PIN(pin)
 
-        index = int(index)
-
         response, sw1, sw2 = cc.satocash_remove_keyset(index)
         print(f"Keyset removed from card")
 
@@ -2501,11 +2505,12 @@ def satocash_remove_keyset(index: str):
         print(f"Error during keyset removal: {ex}")
 
 @main.command()
-@click.option("--keyset-index", help="Keyset-index in satocard")
-@click.option("--amount", help="amount")
+@click.option("--keyset-index", help="Keyset-index in satocard", type=int)
+@click.option("--amount", help="amount", type=int)
 @click.option("--secret", help="ecash secret x as 32-byte hex representation")
 @click.option("--unblinded-key", help="ecash unblinded key as 32-byte hex representation")
-def satocash_import_proof(keyset_index: str, amount: str, secret: str, unblinded_key: str):
+@click.option("--p2pk-path", default=None, help="path (4-byte counter as 8-hex char) for P2PK locked proof")
+def satocash_import_proof(keyset_index: int, amount: int, secret: str, unblinded_key: str, p2pk_path: str):
     """Import a proof into a Satocash. Info includes keyset_index, amount, secret and unblinded-key"""
     try:
         # get PIN from environment variable or interactively
@@ -2518,15 +2523,22 @@ def satocash_import_proof(keyset_index: str, amount: str, secret: str, unblinded
         cc.card_verify_PIN(pin)
 
         # parse data from string
-        keyset_index = int(keyset_index)
-        amount_exponent = math.log(int(amount),2) # the amount is actually stored as the power 2 exponent in [0...63]
+        amount_exponent = int(math.log(amount,2)) # the amount is actually stored as the power 2 exponent in [0...63]
+        if len(secret)<64:
+            # pad secret to make it 64 char long
+            # for P2PK nonce, the 16-byte nonce is stored as a 32-byte secret by prepending '00' bytes
+            secret= '0'*(64-len(secret)) + secret
         secret_bytes = bytes.fromhex(secret)
         unblinded_key_bytes = bytes.fromhex(unblinded_key)
+        p2pk_path_bytes = b''
+        if p2pk_path:
+            p2pk_path_bytes = bytes.fromhex(p2pk_path)
 
-        response, sw1, sw2, index = cc.satocash_import_proof(keyset_index, amount_exponent, secret_bytes, unblinded_key_bytes)
+        response, sw1, sw2, index = cc.satocash_import_proof(keyset_index, amount_exponent, secret_bytes, unblinded_key_bytes, p2pk_path_bytes)
         print(f"Token imported into card at index {index}")
     except Exception as ex:
         print(f"Error during import: {ex}")
+        print(traceback.format_exc())
 
 @main.command()
 @click.option("--index-list", help="list of proofs to fetch by index, in the form '1,2,4,6'.")
@@ -2579,8 +2591,41 @@ def satocash_export_proofs(index_list: str):
                     's': proof['secret_hex'],
                     'c': bytes.fromhex(proof['unblinded_key_hex'])
                 }
+
+                # check proof state for P2PK flag
+                try:
+                    if proof['use_p2pk']:
+
+                        # get signature
+                        pubkey, hash, sig = cc.satocash_export_p2pk_sig(proof['index'])
+                        print("Proof with P2PK:")
+                        print(f"pubkey: {pubkey.hex()}")
+                        print(f"hash: {hash.hex()}")
+                        print(f"p2pk_sig: {sig.hex()}")
+                        proof_dic['w'] = '{"signatures":["' + sig.hex() + '"]}'
+                        #proof_dic['w'] = sig.hex() # debug
+
+                        # P2PK secret
+                        nonce = proof['secret_hex'][32:64]  # nonce is the 32 last hex
+                        print(f"nonce: {nonce}")
+                        #secret = '["P2PK",{"nonce":"' + nonce + '","data":"' + pubkey.hex() + '","tags":[["sigflag","SIG_INPUTS"]]}]'
+                        #secret = '["P2PK",{"data":"' + pubkey.hex() + '","nonce":"' + nonce + '","tags":[["sigflag","SIG_INPUTS"]]}]'
+                        secret = '["P2PK", {"data": "' + pubkey.hex() + '", "nonce": "' + nonce + '", "tags": [["sigflag", "SIG_INPUTS"]]}]'
+                        print(f"secret: {secret}")
+                        proof_dic['s'] = secret
+
+                        # debug: secret hash
+                        secret_hash = hashlib.sha256(secret.encode("utf-8")).digest()
+                        print(f"secret_hash: {secret_hash.hex()}")
+
+                        print(f"witness: {proof_dic['w']}")
+                except Exception as ex:
+                    print(f"Error while checking P2PK for proof: {ex}")
+                    print(traceback.format_exc())
+
                 token_dic['p'] = [proof_dic]
                 tokenv4_dic['t'] = [token_dic]
+                print(f"tokenv4_dic: {tokenv4_dic}")
 
                 # serialize token dic to string
                 tokenv4_str = satocash_serialize_tokenv4(tokenv4_dic)
@@ -2595,11 +2640,34 @@ def satocash_export_proofs(index_list: str):
         print(traceback.format_exc())
 
 @main.command()
+@click.option("--index", default=0, help="Proof index", type=int)
+def satocash_export_p2pk_sig(index: int):
+    """Export P2PK signature and public key for given proof index. The corresponding proof must be P2PK locked."""
+    try:
+        # get PIN from environment variable or interactively
+        # todo: check pin policy?
+        if 'PYSATOCHIP_PIN' in environ:
+            pin = environ.get('PYSATOCHIP_PIN')
+            print("INFO: PIN value recovered from environment variable 'PYSATOCHIP_PIN'")
+        else:
+            pin = getpass("Enter your PIN:")
+        cc.card_verify_PIN(pin)
+
+        pubkey, hash, sig = cc.satocash_export_p2pk_sig(index)
+        print(f"pubkey: {pubkey.hex()}")
+        print(f"hash: {hash.hex()}")
+        print(f"p2pk_sig: {sig.hex()}")
+
+    except Exception as ex:
+        print(f"Error while fetching proof info: {ex}")
+
+
+@main.command()
 @click.option("--unit", default="sat", help="Monetary unit for which we want info: sat, msat, USD or EUR")
 @click.option("--info-type", help="The info that we want for each proof: STATE, KEYSET_INDEX, AMOUNT, MINT_INDEX, UNIT")
-@click.option("--index-start", default=0, help="Starting index for proofs")
-@click.option("--index-size", default= 0, help="Number of index for which info is requested, starting from index-start")
-def satocash_get_proof_info(unit: str, info_type: str, index_start: str, index_size: str):
+@click.option("--index-start", default=0, help="Starting index for proofs", type=int)
+@click.option("--index-size", default= 0, help="Number of index for which info is requested, starting from index-start", type=int)
+def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_size: int):
     """Get proof info for a given subset of proofs"""
     try:
         # get PIN from environment variable or interactively
@@ -2615,8 +2683,6 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: str, index_s
         dic_info = {"STATE":0, "KEYSET_INDEX":1, "AMOUNT":2, "MINT_INDEX":3, "UNIT":4}
         unit = dic_unit[unit]
         info_type = dic_info[info_type]
-        index_start = int(index_start)
-        index_size = int(index_size)
         if index_size == 0:
             # get all indexes
             try:
@@ -2635,9 +2701,13 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: str, index_s
         print(f"Token info:")
         for index, value in enumerate(response):
             proof_info_str = value
-            if info_type == 0:
-                proof_info_str = dic_state_by_code.get(value, "UNKNOWN")
-            elif info_type == 2:
+            if info_type == 0: # state
+                proof_info_str = dic_state_by_code.get((value ^ 0x03), "UNKNOWN") # MASK 0x03 to extract spent state.
+                if value & 0x80 == 0x80:
+                    # P2PK flag
+                    proof_info_str += " P2PK"
+
+            elif info_type == 2: # amount
                 if value == 0xFF:
                     # proof is empty or in another denomination unit
                     proof_info_str = 0
@@ -2648,7 +2718,7 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: str, index_s
                     else:
                         # this is an unspent proof
                         proof_info_str = 2 ** value  # value is actually the power 2 exponent
-            elif info_type == 4:
+            elif info_type == 4: # unit
                 proof_info_str = dic_unit_by_code.get(value, "UNKNOWN")
 
             print(f"index: {index_start + index} - info: {proof_info_str} - type: {dic_info_by_code.get(info_type, "UNKNOWN")}")
@@ -2661,6 +2731,16 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: str, index_s
 
     except Exception as ex:
         print(f"Error while fetching proof info: {ex}")
+
+
+@main.command()
+def satocash_get_bip32_extendedkey():
+    """Get a P2PK public key in compressed format from Satocash. This public key can be used to lock a proof that can only be spent by Satocash.
+    A counter that represents the derivation path is also returned. This is used during proof import to tell which path is associated with the P2PK.
+    """
+    counter, pubkey = cc.satocash_get_bip32_extendedkey()
+    print(f"counter: {counter.hex()}")
+    print(f"pubkey: {pubkey.hex()}")
 
 
 @main.command()
@@ -2821,12 +2901,10 @@ def satocash_import_tokenv4(tokenv4: str):
 
 @main.command()
 @click.option("--unit", default="sat", help="Monetary unit for which we want info: sat, msat, USD or EUR")
-@click.option("--amount", help="minimum amount in token to export")
-def satocash_export_tokenv4(unit, amount):
+@click.option("--amount", help="minimum amount in token to export", type=int)
+def satocash_export_tokenv4(unit: str, amount: int):
     """Export a base64 serialized token from satocash for at least a given amount"""
     try:
-        amount = int(amount)
-
         # get status
         response, sw1, sw2, status_dic = cc.satocash_get_status()
         max_nb_mints = status_dic.get('max_nb_mints', 0)
@@ -2932,11 +3010,27 @@ def satocash_export_tokenv4(unit, amount):
             # export proofs
             proof_list = cc.satocash_export_proofs(list(proof_indexes_subset))
             for proof in proof_list:
+
                 proof_dic = {
                     'a':proof['amount'],
                     's':proof['secret_hex'],
                     'c':bytes.fromhex(proof['unblinded_key_hex'])
                 }
+                # check proof state for P2PK flag
+                try:
+                    if proof['use_p2pk']:
+                        # get signature
+                        pubkey, hash, sig = cc.satocash_export_p2pk_sig(proof['index'])
+                        print("Proof with P2PK:")
+                        print(f"pubkey: {pubkey.hex()}")
+                        print(f"hash: {hash.hex()}")
+                        print(f"p2pk_sig: {sig.hex()}")
+                        proof_dic['w'] = '{"signatures":["' + sig.hex() + '"]}'
+                        print(f"witness: {proof_dic['w']}")
+                except Exception as ex:
+                    print(f"Error while checking P2PK for proof: {ex}")
+                    print(traceback.format_exc())
+
                 token_dic['p'] += [proof_dic]
                 print(f"proof_dic: {proof_dic}")
 
@@ -2983,7 +3077,6 @@ def satocash_serialize_tokenv4(tokenv4_dic) -> str:
     # remove padding
     tokenv4_serialized = tokenv4_serialized.rstrip("=")
     return tokenv4_serialized
-
 
 
 """##############################
