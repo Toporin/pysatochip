@@ -3338,7 +3338,7 @@ class CardConnector:
         
         return verif;
     
-    def card_verify_authenticity(self):
+    def card_verify_authenticity(self, backend: str = "auto"):
         logger.debug('In card_verify_authenticity')
         
         # get certificate from device
@@ -3362,7 +3362,7 @@ class CardConnector:
             return False, txt_ca, txt_subca, txt_device, txt_error
 
         # Perform some checks on the certificate
-        validator = CertificateValidator()
+        validator = CertificateValidator(backend=backend)
 
         # Check that the certificate subject matches the device serial number
         cert_dict =  validator.parse_pem_certificate(cert_pem)

@@ -589,7 +589,8 @@ def common_import_ndef_authentikey(privkey):
         print(e)
 
 @main.command()
-def common_verify_authenticity():
+@click.option("--backend", type=click.Choice(["auto", "openssl", "pycryptodomex"]), default="auto", help="Certificate validation backend")
+def common_verify_authenticity(backend):
     if cc.card_get_status()[3]['setup_done'] == False:
         print("Unable to perform this function until setup is complete")
         return
@@ -607,7 +608,7 @@ def common_verify_authenticity():
                 pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
 
-        is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity()
+        is_authentic, txt_ca, txt_subca, txt_device, txt_error = cc.card_verify_authenticity(backend=backend)
         print("Card is authentic:", is_authentic)
         print("CA Cert:", txt_ca)
         print("SubCA Cert:", txt_subca)
