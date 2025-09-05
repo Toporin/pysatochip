@@ -303,7 +303,20 @@ def common_set_card_label(label):
 def common_get_card_ndef():
     """Retrieves the ndef tag for the card"""
     try:
-        if cc.card_type != "Satodime":
+
+        # for satodime (v0.2-0.1+), the command is a little different
+        if cc.card_type == "Satodime":
+            # get version
+            (response, sw1, sw2, d) = cc.card_get_status()
+            version = d["protocol_version"]
+            if (version >= 2):
+                (response, sw1, sw2, ndef_policy, ndef_bytes) = cc.card_get_ndef_v2()
+                print("Device ndef policy:", ndef_policy)
+                print("Device ndef:", ndef_bytes.hex())
+            else:
+                print("Error: NDEF feature not supported for Satodime v0.1")
+
+        else:
             # get PIN from environment variable or interactively
             if 'PYSATOCHIP_PIN' in environ:
                 pin= environ.get('PYSATOCHIP_PIN')
@@ -311,22 +324,46 @@ def common_get_card_ndef():
             else:
                 pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
-        (response, sw1, sw2, ndef_bytes) = cc.card_get_ndef()
-        print("Device ndef:", ndef_bytes.hex())
+
+            (response, sw1, sw2, ndef_bytes) = cc.card_get_ndef()
+            print("Device ndef:", ndef_bytes.hex())
+
     except Exception as e:
         print(e)
 
 @main.command()
 @click.option("--ndef", default="", help="Device NDEF in hexadecimal.")
-def common_set_card_ndef(ndef):
+@click.option("--policy", type=int, default=0x01, help="For Satodime v0.2, device NDEF policy (0: no NDEF, 1: static NDEF, 2: dynamic NDEF)", )
+@click.option("--unlock-secret", default="", help="Satodime only: Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Satodime only: Unlock Counter in HEX format (Not required if connecting over USB)")
+def common_set_card_ndef(ndef, policy, unlock_secret, unlock_counter):
     """Sets a ndef value for the card (Optional)
     For example:
     - google.com is 000fD1010B5502676F6F676C652E636F6D
     - Android app org.satochip.satodimeapp is 002Ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
     """
     try:
-        if cc.card_type != "Satodime":
-            # TODO: for satodime, may fail if performed via NFC (needs ownership)
+        # for satodime (v0.2-0.1+), ownership is required to change NDEF data for security
+        if cc.card_type == "Satodime":
+            # get version
+            (response, sw1, sw2, d) = cc.card_get_status()
+            version = d["protocol_version"]
+            if (version >= 2):
+                if unlock_secret!="" and unlock_counter!="":
+                    unlock_secret = list(bytes.fromhex(unlock_secret))
+                    unlock_counter = list(bytes.fromhex(unlock_counter))
+                    cc.satodime_set_unlock_counter(unlock_counter)
+                    cc.satodime_set_unlock_secret(unlock_secret)
+                ndef_bytes = bytes.fromhex(ndef)
+                (response, sw1, sw2) = cc.card_set_ndef_v2(ndef_bytes, policy)
+                if sw1 != 0x90 or sw2 != 0x00:
+                    print("ERROR: Set ndef Failed with error code: {hex(256*sw1+sw2)}")
+                else:
+                    print("Device ndef Updated")
+            else:
+                print("Error: NDEF feature not supported for Satodime v0.1")
+
+        else:
             # get PIN from environment variable or interactively
             if 'PYSATOCHIP_PIN' in environ:
                 pin= environ.get('PYSATOCHIP_PIN')
@@ -335,12 +372,13 @@ def common_set_card_ndef(ndef):
                 pin = getpass("Enter your PIN:")
             cc.card_verify_PIN(pin)
 
-        ndef_bytes = bytes.fromhex(ndef)
-        (response, sw1, sw2) = cc.card_set_ndef(ndef_bytes)
-        if sw1 != 0x90 or sw2 != 0x00:
-            print("ERROR: Set ndef Failed with error code: {hex(256*sw1+sw2)}")
-        else:
-            print("Device ndef Updated")
+            ndef_bytes = bytes.fromhex(ndef)
+            (response, sw1, sw2) = cc.card_set_ndef(ndef_bytes)
+            if sw1 != 0x90 or sw2 != 0x00:
+                print("ERROR: Set ndef Failed with error code: {hex(256*sw1+sw2)}")
+            else:
+                print("Device ndef Updated")
+
     except Exception as e:
         print(e)
 
@@ -2225,8 +2263,8 @@ def satodime_get_key_status(slot):
         print("Slot Contract:", keyslot_status['key_contract_hex'])
 
 @main.command()
-@click.option("--unlock-secret", default="", help="Unlock Secret (Not required if connecting over USB)")
-@click.option("--unlock-counter", default="", help="Unlock Counter (Not required if connecting over USB)")
+@click.option("--unlock-secret", default="", help="Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Unlock Counter in HEX format (Not required if connecting over USB)")
 def satodime_ownership_transfer(unlock_secret, unlock_counter):
     """Initiate Ownership Transfer"""
     unlock_secret = list(bytes.fromhex(unlock_secret))
@@ -2265,8 +2303,8 @@ def satodime_get_pubkey(slot):
 
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot")
-@click.option("--unlock-secret", default="", help="Unlock Secret (Not required if connecting over USB)")
-@click.option("--unlock-counter", default="", help="Unlock Counter (Not required if connecting over USB)")
+@click.option("--unlock-secret", default="", help="Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Unlock Counter in HEX format (Not required if connecting over USB)")
 def satodime_get_privkey(slot, unlock_secret, unlock_counter):
     """Get Private Key (Hex) for an unsealed Keyslot"""
     unlock_secret = list(bytes.fromhex(unlock_secret))
@@ -2292,8 +2330,8 @@ def satodime_get_privkey(slot, unlock_secret, unlock_counter):
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot (Slots start counting from 0)")
 @click.option("--custom-entropy", default="", help="Some custom entropy to add to the private key generated for this slot")
-@click.option("--unlock-secret", default="", help="Unlock Secret (Not required if connecting over USB)")
-@click.option("--unlock-counter", default="", help="Unlock Counter (Not required if connecting over USB)")
+@click.option("--unlock-secret", default="", help="Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Unlock Counter in HEX format (Not required if connecting over USB)")
 def satodime_key_seal(slot, custom_entropy, unlock_secret, unlock_counter):
     """Generate a Private Key and Seal in a Keyslot"""
     unlock_secret = list(bytes.fromhex(unlock_secret))
@@ -2315,8 +2353,8 @@ def satodime_key_seal(slot, custom_entropy, unlock_secret, unlock_counter):
 
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot (Slots start counting from 0)")
-@click.option("--unlock-secret", default="", help="Unlock Secret (Not required if connecting over USB)")
-@click.option("--unlock-counter", default="", help="Unlock Counter (Not required if connecting over USB)")
+@click.option("--unlock-secret", default="", help="Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Unlock Counter in HEX format (Not required if connecting over USB)")
 def satodime_key_unseal(slot, unlock_secret, unlock_counter):
     """Unseal a Keyslot (Reveal its Private Key)"""
     unlock_secret = list(bytes.fromhex(unlock_secret))
@@ -2341,8 +2379,8 @@ def satodime_key_unseal(slot, unlock_secret, unlock_counter):
 
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot (Slots start counting from 0)")
-@click.option("--unlock-secret", default="", help="Unlock Secret (Not required if connecting over USB)")
-@click.option("--unlock-counter", default="", help="Unlock Counter (Not required if connecting over USB)")
+@click.option("--unlock-secret", default="", help="Unlock Secret in HEX format (Not required if connecting over USB)")
+@click.option("--unlock-counter", default="", help="Unlock Counter in HEX format (Not required if connecting over USB)")
 def satodime_key_reset(slot, unlock_secret, unlock_counter):
     """Reset a keyslot"""
     unlock_secret = list(bytes.fromhex(unlock_secret))

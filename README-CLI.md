@@ -131,5 +131,22 @@ python3 satochip_cli.py satocash-export-p2pk-sig --index 0
 
 * export tokenv4 for a given amount and unit
 ```commandline
- python3 satochip_cli.py satocash-export-tokenv4 --unit "sat" --amount 8
+python3 satochip_cli.py satocash-export-tokenv4 --unit "sat" --amount 8
+```
+
+## Satodime operations
+
+* Get NDEF info:
+```commandline
+python3 satochip_cli.py common-get-card-ndef
+```
+
+* Set NDEF policy to 1 (static NDEF):
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1
+```
+
+* Set NDEF policy to 1 (static NDEF) and NDEF data to "org.satochip.satodimeapp":
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1 --ndef 002ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
 ```

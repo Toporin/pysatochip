@@ -496,42 +496,99 @@ class CardConnector:
         (response, sw1, sw2)= self.card_transmit(apdu)
         
         return (response, sw1, sw2)
-    
+
     def card_get_ndef(self):
-    
+
         logger.debug("In card_get_ndef")
-        cla= JCconstants.CardEdge_CLA
-        ins= 0x3F
-        p1= 0x00
-        p2= 0x01 #get
-        apdu=[cla, ins, p1, p2]
-        (response, sw1, sw2)= self.card_transmit(apdu)
-        
-        if (sw1==0x90 and sw2==0x00):
-            ndef_size= response[0]
-            ndef_bytes= bytes(response[1:])
-        elif (sw1==0x6d and sw2==0x00):  # unsupported by the card  
-            ndef_bytes= []
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x3F
+        p1 = 0x00
+        p2 = 0x01  # get
+        apdu = [cla, ins, p1, p2]
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
+        if (sw1 == 0x90 and sw2 == 0x00):
+            ndef_size = response[0]
+            ndef_bytes = bytes(response[1:])
+        elif (sw1 == 0x6d and sw2 == 0x00):  # unsupported by the card
+            ndef_bytes = []
         else:
-            logger.warning(f"Error while recovering card ndef: {hex(256*sw1+sw2)}")
-            ndef_bytes= []
-        
+            logger.warning(f"Error while recovering card ndef: {hex(256 * sw1 + sw2)}")
+            ndef_bytes = []
+
         return (response, sw1, sw2, ndef_bytes)
 
     def card_set_ndef(self, ndef_bytes):
         logger.debug("In card_set_ndef")
-        cla= JCconstants.CardEdge_CLA
-        ins= 0x3F
-        p1= 0x00
-        p2= 0x00 #set
-        
-        ndef_list= list(ndef_bytes)
-        data= [len(ndef_list)]+ndef_list
-        lc=len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
-        (response, sw1, sw2)= self.card_transmit(apdu)
-        
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x3F
+        p1 = 0x00
+        p2 = 0x00  # set
+
+        ndef_list = list(ndef_bytes)
+        data = [len(ndef_list)] + ndef_list
+        lc = len(data)
+        apdu = [cla, ins, p1, p2, lc] + data
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
         return (response, sw1, sw2)
+
+    def card_get_ndef_v2(self):
+        '''
+        Get NDEF data if enabled.
+        Compatibility: Version v2 is for Satodime v0.2-0.1 and higher
+        '''
+        logger.debug("In card_get_ndef_v2")
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x3F
+        p1 = 0x00
+        p2 = 0x01  # get
+        apdu = [cla, ins, p1, p2]
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
+        if sw1 == 0x90 and sw2 == 0x00:
+            ndef_policy = response[0]
+            ndef_size = 256 * response[1] + response[2]
+            if ndef_policy == 0x01:
+                ndef_bytes = bytes(response[3:])
+            else:
+                ndef_bytes = b''
+        elif sw1 == 0x6d and sw2 == 0x00:  # unsupported by the card
+            raise UnsupportedFeatureError()
+        else:
+            logger.warning(f"Error while recovering card ndef: {hex(256 * sw1 + sw2)}")
+            raise UnexpectedSW12Error(f"Error while recovering card ndef: {hex(256 * sw1 + sw2)}", sw1, sw2)
+
+        return response, sw1, sw2, ndef_policy, ndef_bytes
+
+    def card_set_ndef_v2(self, ndef_bytes, ndef_policy=0x01):
+        '''
+        Set NDEF data if enabled.
+        Compatibility: Version v2 is for Satodime v0.2-0.1 and higher
+        '''
+        logger.debug("In card_set_ndef_v2")
+        cla = JCconstants.CardEdge_CLA
+        ins = 0x3F
+        p1 = ndef_policy
+        p2 = 0x00  # set
+
+        ndef_list = list(ndef_bytes)
+        datasize = 1 + len(ndef_list) + SIZE_UNLOCK_COUNTER + SIZE_UNLOCK_CODE
+        apduheader = [cla, ins, p1, p2, datasize]
+
+        data = [len(ndef_list)] + ndef_list + self.unlock_counter
+
+        # compute unlock_code
+        unlock_code = list(
+            hmac.new(bytes(self.unlock_secret), bytes(apduheader + data), hashlib.sha1).digest())
+
+        data = data + unlock_code
+        if len(data) != datasize:
+            raise Exception(f"Error in card_set_ndef_v2: wrong data length {len(data)} instead of {datasize}")
+        apdu = apduheader + data
+        (response, sw1, sw2) = self.card_transmit(apdu)
+
+        return response, sw1, sw2
 
     def card_set_nfc_policy(self, policy_byte):
         logger.debug("In card_set_nfc_policy")
@@ -3793,56 +3850,58 @@ class CardConnector:
     ################################# 
     
 class ApduError(Exception):
-    def __init__(self, message, sw1=0x00, sw2=0x00, ins=0x00, response=[]):
+    def __init__(self, message="", sw1=0x00, sw2=0x00, ins=0x00):
         super().__init__(message)
         self.sw1 = sw1
         self.sw2= sw2
         self.ins= ins
-        self.response= response
 
-
+# Generic
 class CardSelectError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x6A, 0x82, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x6A, 0x82, ins)
 
-# Generic 
 class CardSetupNotDoneError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x04, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x04, ins)
 
 class IncorrectP1Error(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x10, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x10, ins)
+
+class UnsupportedFeatureError(ApduError):
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x6d, 0x00, ins)
 
 # Satodime
 class UnknownProtocolMediaError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x54, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x54, ins)
 
 class IncorrectProtocolMediaError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x53, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x53, ins)
 
 class IncorrectKeyslotStateError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x52, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x52, ins)
 
 class IncorrectUnlockCodeError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x51, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x51, ins)
 
 class IncorrectUnlockCounterError(ApduError):
-    def __init__(self, message, ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x50, ins, response)
+    def __init__(self, message="", ins=0x00):
+        super().__init__(message, 0x9c, 0x50, ins)
 
 # Satocash
 class InvalidP2PKPathError(ApduError):
-    def __init__(self, message="Invalid key derivation path for P2PK proof", ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x61, ins, response)
+    def __init__(self, message="Invalid key derivation path for P2PK proof", ins=0x00):
+        super().__init__(message, 0x9c, 0x61, ins)
 
 class ReusedP2PKPathError(ApduError):
-    def __init__(self, message="Key derivation path for P2PK proof has already been used", ins=0x00, response=[]):
-        super().__init__(message, 0x9c, 0x62, ins, response)
+    def __init__(self, message="Key derivation path for P2PK proof has already been used", ins=0x00):
+        super().__init__(message, 0x9c, 0x62, ins)
 
 class SecureChannelError(Exception):
     """Exception related to the secure channel"""
