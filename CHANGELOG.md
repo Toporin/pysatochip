@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.4]: 
+
+Feat: add pycryptodomex fallback for certificate-chain / authenticity validation
+
+Some environments (e.g. embedded/SeedSigner-style setups) do not have OpenSSL/pyOpenSSL available, making common-verify-authenticity unusable.
+
+certificate_validator.py now tries OpenSSL first and falls back to a pure-Python implementation using pycryptodomex + ecdsa. 
+A new --backend CLI option lets callers force auto (default), openssl, or pycryptodomex.
+
+requirements.txt adds pycryptodomex>=3.18 and README.md documents the option.
+
 ## [0.17.3]: 
 
 Fix: correct handling of Password, Descriptor and Data secret types in seedkeeper export (https://github.com/Toporin/pysatochip/pull/9)

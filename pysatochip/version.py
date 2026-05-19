@@ -56,7 +56,8 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.17.1: support for Satocash P2PK proof
 # v0.17.2: add support for Satodime v2 cardNdef() command APDU
 # v0.17.3: fix: correct handling of Password, Descriptor and Data secret types in seedkeeper export
+# v0.17.4: feat: add pycryptodomex fallback for certificate-chain / authenticity validation
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 17
-PYSATOCHIP_REVISION= 3
+PYSATOCHIP_REVISION= 4
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
