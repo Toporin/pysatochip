@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2]: 
+
+Add support for Satodime cardNdef() command APDU
+Add card_get_ndef_v2() & card_set_ndef_v2() functions:
+* Check ownership for changing NDEF data
+* Support 3 NDEF policies: 0: No NDEF, 1: static NDEF, 2: dynamic NDEF
+* Change response format when getting current NDEF data.
+* Note that APDU format is not compatible with current format used in seedkeeper applet
+    
+Also add CLI support, refactor a bit ApduError class and add UnsupportedFeatureError.
+
 ## [0.17.1]: 
 
 Satocash: add NUT11 support (P2PK locked token)

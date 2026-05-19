@@ -341,6 +341,8 @@ def common_set_card_ndef(ndef, policy, unlock_secret, unlock_counter):
     For example:
     - google.com is 000fD1010B5502676F6F676C652E636F6D
     - Android app org.satochip.satodimeapp is 002Ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
+    - Android app arg.satochip.seedkeeper is 0029d40f17616e64726f69642e636f6d3a706b676f72672e7361746f636869702e736565646b6565706572
+    - empty tag is 0003D00000
     """
     try:
         # for satodime (v0.2-0.1+), ownership is required to change NDEF data for security
