@@ -36,7 +36,8 @@ SEEDKEEPER_DIC_TYPE = {
     0x91: 'Master Password', 
     0xA0: 'Authentikey certificate', 
     0xB0: '2FA secret',
-    0xC0: 'Data'
+    0xC0: 'Data',
+    0xC1: 'Descriptor'
 }
 
 SEEDKEEPER_DIC_ORIGIN = {0x01: 'Plaintext import', 0x02: 'Encrypted import', 0x03: 'Generated on card'}
