@@ -88,3 +88,65 @@ python3 satochip_cli.py --verbose satocash-import-tokenv4 --tokenv4 "..."
 ```commandline
 python3 satochip_cli.py --verbose satocash-export-tokenv4 --unit "sat" --amount "10"
 ```
+
+* import mint
+```commandline
+python3 satochip_cli.py satocash-import-mint --url https://testnut.cashu.space
+```
+
+* export mint
+```commandline
+python3 satochip_cli.py satocash-export-mint --index 0
+```
+
+* import keyset
+```commandline
+python3 satochip_cli.py satocash-import-keyset --keyset-id 00dff24b65d02838 --mint-index 0 --unit sat
+```
+
+* export keyset
+```commandline
+python3 satochip_cli.py satocash-export-keysets --index-list "1"
+```
+
+* get publick key for P2PK proof (NUT11)
+```commandline
+python3 satochip_cli.py satocash-get-bip32-extendedkey
+```
+
+* import proof with P2PK_path for locked script
+```commandline
+python3 satochip_cli.py satocash-import-proof --keyset-index 0 --amount 1 --secret "..." --unblinded-key "..." --p2pk-path "..."
+```
+
+* export proof
+```commandline
+python3 satochip_cli.py satocash-export-proofs --index-list "0"
+```
+
+* export P2PK signature for locked script
+```commandline
+python3 satochip_cli.py satocash-export-p2pk-sig --index 0
+```
+
+* export tokenv4 for a given amount and unit
+```commandline
+python3 satochip_cli.py satocash-export-tokenv4 --unit "sat" --amount 8
+```
+
+## Satodime operations
+
+* Get NDEF info:
+```commandline
+python3 satochip_cli.py common-get-card-ndef
+```
+
+* Set NDEF policy to 1 (static NDEF):
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1
+```
+
+* Set NDEF policy to 1 (static NDEF) and NDEF data to "org.satochip.satodimeapp":
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1 --ndef 002ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
+```
