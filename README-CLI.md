@@ -29,6 +29,18 @@ Or, to install from sources:
 python3 setup.py install[CLI]
 ```
 
+## Common operations
+
+* Verify a card authenticity using default backend:
+```commandline
+python3 satochip_cli.py common-verify-authenticity
+```
+
+* Verify a card authenticity using pycryptodomex backend:
+```commandline
+python3 satochip_cli.py common-verify-authenticity --backend pycryptodomex
+```
+
 ## Sign Nostr event
 
 _Note: to use this functionality you will need a card with the Satochip applet [v0.14-0.2](https://github.com/Toporin/SatochipApplet/releases/tag/v0.14-0.2) or higher._

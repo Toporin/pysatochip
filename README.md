@@ -36,6 +36,21 @@ There are a wide range of available commands, each with their own relevant optio
 
 _There are also some general tools, such as those required to decrypt encrypted Seedkeeper JSON backups. (These can be accessed either standalone or via the module)_
 
+### Card Authenticity Check
+
+Use the `common-verify-authenticity` command to verify that the connected card was issued by Satochip:
+
+```
+satochip-cli common-verify-authenticity
+```
+
+By default the command relies on OpenSSL for certificate validation. If OpenSSL is not available, it falls back to a pure Python implementation using `pycryptodomex`. You can force a specific backend with the `--backend` option, choosing between `auto`, `openssl`, or `pycryptodomex`:
+
+```
+satochip-cli common-verify-authenticity --backend pycryptodomex
+```
+
+
 More details about the `satochip-cli` [here](https://github.com/Toporin/pysatochip/blob/master/README-CLI.md).
 
 ## Running from Source
