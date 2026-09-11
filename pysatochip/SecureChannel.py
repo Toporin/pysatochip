@@ -1,12 +1,10 @@
-from ecdsa import ECDH
-from ecdsa.curves import SECP256k1
-from ecdsa.keys import VerifyingKey
-
 import pyaes
 import hmac
 import logging 
 from os import urandom
 from hashlib import sha1, sha256
+
+from . import ec_backend
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -26,20 +24,23 @@ class SecureChannel:
         self.derived_key = None
         self.mac_key = None
         
-        self.ecdh = ECDH(curve=SECP256k1)
-        self.ecdh.generate_private_key()
-        self.sc_pubkey = self.ecdh.get_public_key()
-        self.sc_pubkey_serialized= self.sc_pubkey.to_string(encoding='uncompressed')
+        # fresh ephemeral keypair per session. Both are plain bytes now: the
+        # scalar multiplication is done by ec_backend rather than by ecdsa,
+        # whose non-constant-time implementation leaked the private key
+        # through timing (CVE-2024-23342, issue #8).
+        self.sc_privkey, self.sc_pubkey_serialized = ec_backend.generate_keypair()
+        self.sc_pubkey = self.sc_pubkey_serialized  # uncompressed, 65 bytes
         
     def initiate_secure_channel(self, peer_pubkey_bytes):
         logger.debug("In initiate_secure_channel()")
         
         self.sc_IVcounter= 1
         
-        #using ecdsa
-        self.sc_peer_pubkey= VerifyingKey.from_string(peer_pubkey_bytes,  curve=SECP256k1)
-        self.ecdh.load_received_public_key(self.sc_peer_pubkey)
-        self.shared_key = self.ecdh.generate_sharedsecret_bytes()
+        # ecdh_shared_x() rejects a peer point that is not on the curve (as
+        # VerifyingKey.from_string(validate_point=True) used to) and returns the
+        # raw x-coordinate the applet derives on its side
+        self.sc_peer_pubkey= peer_pubkey_bytes
+        self.shared_key = ec_backend.ecdh_shared_x(self.sc_privkey, peer_pubkey_bytes)
         
         #logger.debug("Shared key:"+ self.shared_key.hex()) #debug
         

@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0]:
+
+Security: remove the `ecdsa` dependency (https://github.com/Toporin/pysatochip/issues/8)
+
+The pure-python `ecdsa` package is affected by CVE-2024-23342 ("Minerva"): its scalar multiplication is
+not constant time, so every operation involving a private key -- ECDSA signing and ECDH key exchange --
+leaks information about the secret through timing. Upstream closed the report as "not planned" and
+describes the library as a teaching/testing tool rather than a production implementation, so pysatochip
+no longer depends on it at all.
+
+Private-key operations now go through a side-channel-hardened backend, selected automatically:
+* `cryptography` (pyca/OpenSSL) by default. Already a pysatochip dependency, with wheels for every
+  desktop platform.
+* libsecp256k1 via `embit`'s ctypes binding when `cryptography` is unavailable. This covers embedded
+  builds such as seedsigner-os, which ship embit (with a prebuilt libsecp256k1 for armv6l/armv7l/
+  aarch64) but not cryptography. Install with `pip install pysatochip[embedded]`.
+
+If neither backend is present, private-key operations now raise `NoECBackendError` rather than silently
+falling back to a vulnerable implementation. Signature verification keeps working in that case.
+
+Two new modules: `ec_backend.py` (backend selection and the hardened primitives) and `ec_math.py`
+(pure-python secp256k1 arithmetic, signature encoding and public-key recovery -- public data only, where
+constant-time execution is not a requirement and pyca/cryptography offers no recovery API).
+
+`certificate_validator.py`'s pycryptodomex fallback no longer needs `ecdsa` either: the secp384r1
+root-CA link is verified with cryptography or pycryptodomex, and the secp256k1 subCA link through
+`ec_backend`.
+
+The card wire format is unchanged -- the ECDH shared secret, secure channel key derivation and all
+signature encodings are byte-identical to 0.17.4, and this is pinned by regression vectors captured from
+the old implementation (`tests/vectors.py`).
+
+Adds a `tests/` suite that runs without a smartcard (`python tests/run_all.py`), covering both backends,
+the certificate chain, and the environments where one backend or the other is missing.
+
+Behaviour change: `ECPrivkey.sign()` is no longer guaranteed to be deterministic. libsecp256k1 uses
+RFC-6979 while OpenSSL uses a random nonce, so signatures stay valid, low-S and Bitcoin-compliant but are
+no longer byte-identical between runs or backends. RFC-6979 is not required for validity.
+
 ## [0.17.4]: 
 
 Feat: add pycryptodomex fallback for certificate-chain / authenticity validation

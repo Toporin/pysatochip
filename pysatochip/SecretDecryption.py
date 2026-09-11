@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ecdsa import SigningKey, SECP256k1, ECDH
 import binascii, json, hmac, hashlib, argparse, logging
 
 import cryptography
@@ -25,6 +24,7 @@ from cryptography.hazmat.primitives.ciphers import algorithms as CG_algorithms
 from cryptography.hazmat.primitives.ciphers import modes as CG_modes
 from cryptography.hazmat.backends import default_backend as CG_default_backend
 
+from pysatochip import ec_backend
 from pysatochip.JCconstants import *
 
 logging.basicConfig(level=logging.ERROR, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
@@ -45,14 +45,16 @@ def unpad(s): return s[0:-ord(s[-1:])]
 def Decrypt_Secret(privateKey, export_data):
 	decrypted_secrets = []
 
-	# Load Key & Generate Shared Secret
-	ecdh = ECDH(curve=SECP256k1)
-	generated_pubkey = ecdh.load_private_key_bytes(binascii.unhexlify(privateKey)).to_string().hex()
+	# Load Key & Generate Shared Secret.
+	# This is a long-term user private key, so the scalar multiplication has to
+	# happen in a side-channel-hardened backend (issue #8 / CVE-2024-23342).
+	privkey_bytes = binascii.unhexlify(privateKey)
+	generated_pubkey = ec_backend.privkey_to_pubkey(privkey_bytes, compressed=False)[1:].hex()
 	if generated_pubkey != export_data['authentikey_importer'][2:]:
 		raise Exception("Derived Public Key doesn't match Required Public Key...")
 
-	ecdh.load_received_public_key_bytes(binascii.unhexlify(export_data['authentikey_exporter']))
-	shared_secret = ecdh.generate_sharedsecret_bytes()
+	exporter_pubkey = binascii.unhexlify(export_data['authentikey_exporter'])
+	shared_secret = ec_backend.ecdh_shared_x(privkey_bytes, exporter_pubkey)
 
 	#Generate keys for decryption and mac
 	decryption_key = hmac.new(shared_secret, msg = SECRET_CST_SC[:6], digestmod = hashlib.sha1).digest()[:-4]

@@ -28,6 +28,22 @@ You can install this module on your system with the command `python setup.py ins
 
 To use the Command Line Interface, you need to install additional dependencies, use this command instead: `pip install "pysatochip[CLI]"` or `pip install -e ".[CLI]"` (local install). 
 
+### Cryptographic backend
+
+All operations involving a private key (the card secure channel's ECDH key exchange, and signing) run on
+a side-channel-hardened implementation. pysatochip picks one automatically:
+
+1. [`cryptography`](https://cryptography.io) (pyca/OpenSSL) — the default, installed as a normal dependency.
+2. [libsecp256k1](https://github.com/bitcoin-core/secp256k1) through [`embit`](https://pypi.org/project/embit/)
+   — used when `cryptography` is unavailable, which is typically the case on embedded builds such as
+   seedsigner-os. Install it with `pip install "pysatochip[embedded]"`.
+
+If neither is present, pysatochip raises an error on any private-key operation rather than falling back to
+a vulnerable implementation; signature verification continues to work. The pure-python `ecdsa` package is
+no longer used or required, as it is affected by
+[CVE-2024-23342](https://github.com/tlsfuzzer/python-ecdsa/issues/330) — see
+[issue #8](https://github.com/Toporin/pysatochip/issues/8).
+
 
 ## Command Line Interface
 Once you have installed the module, you can access its functionality through a command line client `satochip-cli`.
@@ -62,6 +78,79 @@ If you don't want to install the pysatochip module, you can also run a number of
 **SatoChip Hardware Test** `python test_satochip.py`
 
 **SeedKeeper Hardware Test** `python test_seedkeeper.py`
+
+## Running the Tests
+
+The suite in `tests/` needs no hardware and runs in a few seconds:
+
+```
+python tests/run_all.py
+```
+
+Or with stdlib discovery, from the repository root:
+
+```
+python -m unittest discover -s tests -t .
+```
+
+To narrow things down, any test file can be run directly, and you can select a single class or method:
+
+```
+python tests/test_ec_backend.py
+python tests/test_ec_backend.py TestECDH
+python tests/test_ec_backend.py TestECDH.test_shared_secret_matches_frozen_vector
+```
+
+| File | Covers |
+|---|---|
+| `test_ec_backend.py` | ECDH, key derivation, signing, verification and public key recovery, run against every available backend |
+| `test_ec_math.py` | Curve arithmetic, signature encoding, DER strictness |
+| `test_ecc.py` | The `ECPubkey` / `ECPrivkey` public API |
+| `test_secure_channel.py` | The ECDH handshake and AES layer, against a simulated applet |
+| `test_certificate_validator.py` | Both legs of the certificate chain, including the shipped CA certificates |
+| `test_backend_scenarios.py` | Whole-environment checks with dependencies deliberately made unimportable |
+
+### Backend coverage
+
+Most tests run once per available backend, so what gets exercised depends on what is installed. With only
+`cryptography` you will see `OK (skipped=11)`: the libsecp256k1 and cross-backend tests skip themselves.
+Install the optional backend to cover both:
+
+```
+pip install "pysatochip[embedded]"
+```
+
+`test_backend_scenarios.py` covers the single-backend cases either way, by blocking imports in a
+subprocess. It is what verifies that pysatochip still works on a build with neither `cryptography` nor
+pyOpenSSL available, and that a private-key operation fails loudly when no hardened backend is present.
+
+### Regression vectors
+
+`tests/vectors.py` holds secp256k1 values captured from the pre-0.18.0 implementation. `ECDH_SHARED_X` in
+particular pins the card secure-channel wire format: the applet derives the same shared secret on its
+side, so if that value ever changes, every Satochip / SeedKeeper / Satodime session breaks. Treat a
+failure there as a compatibility break rather than a broken test.
+
+`tests/_gen_vectors.py` records how those vectors were produced, against the old `ecdsa` implementation.
+It refuses to run on the current tree, because signing is no longer deterministic here and it would emit
+signature values that do not match the ones being pinned. To audit a vector, check out the previous
+release instead:
+
+```
+git checkout v0.17.4 && pip install ecdsa && python tests/_gen_vectors.py
+```
+
+### Hardware tests
+
+The tests in the repository root are separate and need a card in a reader, ideally a non-initialized one.
+They are not part of `run_all.py`:
+
+```
+python test_satochip.py
+python test_seedkeeper.py
+```
+
+`test_satochip_musig2.py` additionally requires a debug build of the applet.
 
 ## Development version (Windows)
 
