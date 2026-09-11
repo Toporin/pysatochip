@@ -22,9 +22,7 @@ import base64
 from typing import List
 from hashlib import sha256
 from struct import pack, unpack
-from ecdsa.curves import SECP256k1
-from ecdsa.util import sigdecode_der
-
+from . import ec_backend
 from .ecc import ECPubkey, ECPrivkey, InvalidECPointException, sig_string_from_der_sig, sig_string_from_r_and_s, get_r_and_s_from_sig_string, CURVE_ORDER
 from .JCconstants import *
 from .slip44 import *
@@ -610,8 +608,6 @@ class CardDataParser:
     def verify_challenge_response_pki(self, response, challenge_from_host, pubkey):
         logger.debug("In verify_challenge_response_pki")
         
-        from ecdsa import VerifyingKey, BadSignatureError, MalformedPointError
-        
         # parse response 
         challenge_from_device= bytes(response[0:32])
         sig_size= ((response[32] & 0xFF)<<8) + (response[33] & 0xFF)
@@ -620,14 +616,13 @@ class CardDataParser:
         logger.debug("challenge: "+ challenge.hex())
         
         # parse pubkey & verify sig
-        vk = VerifyingKey.from_string(bytes(pubkey), curve=SECP256k1, hashfunc=sha256, validate_point=True)
         try:
-            vk.verify(sig, challenge, hashfunc=sha256, sigdecode=sigdecode_der)
-            return True, ""
-        except BadSignatureError:
-            return False, "Bad signature during challenge response!"
-        except MalformedPointError:
+            is_valid = ec_backend.verify_message(bytes(pubkey), challenge, sig, "sha256")
+        except InvalidECPointException:
             return False, "Invalid X9.62 encoding of the public key: " + bytes(pubkey).hex()
+        if not is_valid:
+            return False, "Bad signature during challenge response!"
+        return True, ""
         
         
     #################################

@@ -36,6 +36,11 @@ setuptools.setup(
     install_requires=requirements,
     extras_require={
         "CLI": ["mnemonic", "click", "websockets", "nostr", "cbor2"],
+        # Alternative side-channel-hardened EC backend, for environments
+        # without pyca/cryptography (e.g. seedsigner-os on armv6). embit
+        # bundles a prebuilt libsecp256k1; pysatochip only uses its ctypes
+        # binding. Optional: cryptography is the default backend.
+        "embedded": ["embit>=0.8.0"],
     },
     packages=setuptools.find_packages(),
     package_dir={

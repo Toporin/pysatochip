@@ -33,11 +33,11 @@ import click
 import websockets
 import asyncio
 import math
-from ecdsa import SECP256k1, ECDH
 from mnemonic import Mnemonic
 from nostr.event import Event, EventKind
 from smartcard.System import readers
 
+from pysatochip import ec_backend
 from pysatochip.CardConnector import (CardConnector, IncorrectUnlockCodeError, IncorrectUnlockCounterError,
                                       IdentityBlockedError, WrongPinError, CardObjectAlreadyPresentError)
 from pysatochip.JCconstants import *
@@ -2344,8 +2344,10 @@ def satodime_get_privkey(slot, unlock_secret, unlock_counter):
         (response, sw1, sw2, entropy_list, privkey_list) = cc.satodime_get_privkey(slot)
         print("Privkey (Hex):", bytes(privkey_list).hex())
         print("Privkey Entropy:", bytes(entropy_list).hex())
-        print("Custom Entropy (Set when key Sealed):", bytes(entropy_list)[:32].decode())
-
+        try:
+            print("Custom Entropy (Set when key Sealed):", bytes(entropy_list)[:32].decode())
+        except UnicodeDecodeError:
+            pass
         print()
         print("Updated Unlock Counter:", bytes(cc.unlock_counter).hex())
     except IncorrectUnlockCounterError:
@@ -3168,9 +3170,9 @@ def util_decrypt_secret_export(json_file):
 @main.command()
 def util_generate_local_keypair():
     """Generate a local Pubkey/Privkey pair"""
-    privkey = binascii.hexlify(urandom(32))
-    ecdh = ECDH(curve=SECP256k1)
-    pubkey = ecdh.load_private_key_bytes(binascii.unhexlify(privkey)).to_string().hex()
+    privkey_bytes, pubkey_bytes = ec_backend.generate_keypair()
+    privkey = binascii.hexlify(privkey_bytes)
+    pubkey = pubkey_bytes[1:].hex()  # strip the 0x04 prefix, re-added on print
     print("Privkey:", privkey.decode())
     print("Pubkey:", '04' + pubkey)
 

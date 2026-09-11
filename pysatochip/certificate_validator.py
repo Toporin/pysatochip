@@ -144,24 +144,32 @@ class CertificateValidator:
             return self._validate_chain_pycryptodomex(ca_pem, subca_pem, device_pem)
 
     def _validate_chain_pycryptodomex(self, ca_pem, subca_pem, device_pem):
+        """Verify the certificate chain without pyOpenSSL.
+
+        ASN.1 parsing is done with pycryptodomex; the signature checks go
+        through ec_backend (see issue #8 -- this used to call into `ecdsa`).
+        """
         txt_ca = txt_subca = txt_device = "OpenSSL module not available"
         device_pubkey = bytes(65 * [0])
         try:
             from Cryptodome.Util.asn1 import DerSequence, DerSetOf, DerObjectId, DerBitString, DerObject
-            from Cryptodome.Hash import SHA256, SHA384, SHA512
-            from ecdsa import VerifyingKey, NIST384p, SECP256k1, util
             import re, base64
             from datetime import datetime
 
+            from . import ec_backend
+
+            # signatureAlgorithm OID -> hash name understood by ec_backend
             HASHES = {
-                '1.2.840.10045.4.3.2': SHA256,
-                '1.2.840.10045.4.3.3': SHA384,
-                '1.2.840.10045.4.3.4': SHA512,
+                '1.2.840.10045.4.3.2': 'sha256',
+                '1.2.840.10045.4.3.3': 'sha384',
+                '1.2.840.10045.4.3.4': 'sha512',
             }
+            # namedCurve OID -> curve name. The Satochip chain uses a secp384r1
+            # root CA which signs secp256k1 subCAs, so both are needed.
             CURVES = {
-                '1.3.132.0.10': SECP256k1,
-                '1.3.132.0.34': NIST384p,
-                '1.2.840.10045.3.1.7': None,
+                '1.3.132.0.10': 'secp256k1',
+                '1.3.132.0.34': 'secp384r1',
+                '1.2.840.10045.3.1.7': None,  # secp256r1: not supported
             }
 
             def der_from_pem(pem):
@@ -232,9 +240,22 @@ class CertificateValidator:
                 }
 
             def verify_cert(issuer_pub_bytes, issuer_curve, cert_info):
-                vk = VerifyingKey.from_string(issuer_pub_bytes[1:], curve=issuer_curve)
-                hmod = HASHES[cert_info['sig_oid']]
-                vk.verify(cert_info['sig'], cert_info['tbs'], hashfunc=lambda x, hm=hmod: hm.new(x), sigdecode=util.sigdecode_der)
+                hashalg = HASHES.get(cert_info['sig_oid'])
+                if hashalg is None:
+                    raise ValueError(
+                        "Unsupported signature algorithm: " + str(cert_info['sig_oid']))
+                if issuer_curve == 'secp384r1':
+                    # libsecp256k1 cannot do P-384; ec_backend uses cryptography
+                    # or pycryptodomex for this curve
+                    is_valid = ec_backend.verify_p384(
+                        issuer_pub_bytes, cert_info['tbs'], cert_info['sig'], hashalg)
+                elif issuer_curve == 'secp256k1':
+                    is_valid = ec_backend.verify_message(
+                        issuer_pub_bytes, cert_info['tbs'], cert_info['sig'], hashalg)
+                else:
+                    raise ValueError("Unsupported issuer curve: " + str(issuer_curve))
+                if not is_valid:
+                    raise ValueError("Bad certificate signature")
 
             def pubkey_curve(cert_info):
                 curve = CURVES.get(cert_info['curve_oid'])
