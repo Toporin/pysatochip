@@ -759,7 +759,7 @@ class CardConnector:
 
         if sw1 != 0x90 or sw2 != 0x00:
             logger.error(f"Error during privkey import: (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256*sw1+sw2)})", sw1=sw1, sw2=sw2)
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
         return
 
@@ -787,7 +787,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if sw1 != 0x90 or sw2 != 0x00:
             logger.error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})")
-            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1=sw1, sw2=sw2)
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1, sw2)
 
         return
 
@@ -811,8 +811,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if sw1 != 0x90 or sw2 != 0x00:
             logger.error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})")
-            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1=sw1,
-                                      sw2=sw2)
+            raise UnexpectedSW12Error(f"Error during privkey import: (error code {hex(256 * sw1 + sw2)})", sw1, sw2)
 
         # response [coordx_size(2b) | pubkey_coordx | sig_size(2b) | sig]
         pubkey = self.parser.parse_get_pubkey_from_keyslot(response)
@@ -866,6 +865,11 @@ class CardConnector:
         elif (sw1==0x9C and sw2==0x0F):
             logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
             raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
+        else:
+            # do not return a None authentikey silently: the failure would only
+            # surface later, on the first command that needs the seed
+            logger.error(f"Unexpected error during seed import (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f'Unexpected error during seed import (error code {hex(256*sw1+sw2)})', sw1, sw2)
         
         return authentikey
     
@@ -922,7 +926,7 @@ class CardConnector:
             raise CardError('Secure import failed: TrustedPubkey (0x9C35)!')
         else:
             logger.error(f"Error during secret import (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})", sw1, sw2)
         
         secret_type= header[0]
         if  secret_type==0x10:
@@ -1026,7 +1030,7 @@ class CardConnector:
             raise UninitializedSeedError('Satochip is not initialized! You should create a new wallet!\n\n'+MSG_WARNING)
         else:
             logger.warning(f"Unexpected error during authentikey export (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during authentikey export (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during authentikey export (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
     
     def card_reset_seed(self, pin, hmac=[]):
@@ -1155,7 +1159,7 @@ class CardConnector:
                 apdu[3]=apdu[3]&0x7f # reset the flag
             # other (unexpected) error
             if (sw1!=0x90) or (sw2!=0x00):
-                raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})')
+                raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})', sw1, sw2)
             if (sw1==0x90) and (sw2==0x00):
                 if (option_flags & 0x04) == 0x04: # BIP85
                     entropy_bytes= self.parser.parse_bip32_get_extendedkey_bip85(response)
@@ -1722,7 +1726,7 @@ class CardConnector:
             raise CardError(f"Error during 2fa import: command unsupported (0x6D00)")
         else:
             logger.error(f'Unexpected error code: {hex(256*sw1+sw2)}')
-            raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
+            raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}', sw1, sw2)
         return (response, sw1, sw2)
 
     def card_reset_2FA_key(self, chalresponse):
@@ -1787,7 +1791,7 @@ class CardConnector:
             elif sw1==0x9c and sw2==0x19:
                 raise RuntimeError(f"Error: 2FA is not enabled (error code: {hex(256*sw1+sw2)}")
             else:
-                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
+                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}', sw1, sw2)
         else:
             p1= 0x01
             lc= 0x10
@@ -1805,7 +1809,7 @@ class CardConnector:
             elif sw1==0x9c and sw2==0x19:
                 raise RuntimeError(f"Error: 2FA is not enabled (error code: {hex(256*sw1+sw2)}")
             else:
-                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}')
+                raise UnexpectedSW12Error(f'Unexpected error code: {hex(256*sw1+sw2)}', sw1, sw2)
             
         # msg is cut in chunks and each chunk is sent to the card for encryption/decryption
         # given the protocol overhead, size of each chunk is limited in size:
@@ -2290,7 +2294,7 @@ class CardConnector:
             raise CardSetupNotDoneError(f"Error while fetching SeedKeeper status: setup not done (code 0x9C04)")
         else: 
             logger.error(f"Error while fetching SeedKeeper status: (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Error while fetching SeedKeeper status: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error while fetching SeedKeeper status: (error code {hex(256*sw1+sw2)})", sw1, sw2)
         
         offset=0
         seedKeeper_status={}
@@ -2519,7 +2523,7 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if (sw1!=0x90 or sw2!=0x00):
             logger.error(f"Error during secret import - OP_INIT: {(sw1*256+sw2):0>4X}")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})", sw1, sw2)
             
         # OP_PROCESS
         p2= 0x02
@@ -2537,7 +2541,7 @@ class CardConnector:
             response, sw1, sw2 = self.card_transmit(apdu)
             if (sw1!=0x90 or sw2!=0x00):
                 logger.error(f"Error during secret import - OP_PROCESS (error code {hex(256*sw1+sw2)})")
-                raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
+                raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})", sw1, sw2)
             secret_offset+=chunk_size
             secret_remaining-=chunk_size
         
@@ -2555,7 +2559,7 @@ class CardConnector:
             raise SeedKeeperError(f"Error during secret import: wrong mac (error code {hex(256*sw1+sw2)})")
         elif (sw1!=0x90 or sw2!=0x00):
             logger.error(f"Error during secret import - OP_FINAL (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during secure secret import (error code {hex(256*sw1+sw2)})", sw1, sw2)
         secret_offset+=chunk_size
         secret_remaining=0
         
@@ -2613,7 +2617,7 @@ class CardConnector:
             raise SeedKeeperError("Export failed: Invalid Pubkey Selected")
         else:
             logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})", sw1, sw2)
         #TODO add more SW support
 
         # parse header
@@ -2642,7 +2646,7 @@ class CardConnector:
                 raise SeedKeeperError("Export failed: lock error - try again")
             else:
                 logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
-                raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+                raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
             # parse data
             response_size= len(response)
@@ -2717,7 +2721,7 @@ class CardConnector:
             raise SeedKeeperError("Export failed: invalid parameter")
         else:
             logger.warning(f"Unexpected error (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})", sw1, sw2)
         #TODO add more SW support
 
         response_offset= 0
@@ -2785,7 +2789,7 @@ class CardConnector:
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})", sw1, sw2)
             
         return headers
 
@@ -2814,7 +2818,7 @@ class CardConnector:
             return response, sw1, sw2, dic
         else:
             logger.warning(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Unexpected error during object deletion (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
 
     def seedkeeper_print_logs(self, print_all=True):
@@ -2847,7 +2851,7 @@ class CardConnector:
             raise UninitializedSeedError("SeedKeeper is not initialized!")
         else:
             logger.warning(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})")    
+            raise UnexpectedSW12Error(f"Unexpected error during object listing (error code {hex(256*sw1+sw2)})", sw1, sw2)
             
         #next logs
         p2= 0x02
@@ -3394,7 +3398,7 @@ class CardConnector:
             raise CardError(f"Error during personalization pubkey export: command unsupported (0x6D00)")
         else: 
             logger.error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error during personalization pubkey export (error code {hex(256*sw1+sw2)})", sw1, sw2)
         return response
 
     def card_import_perso_certificate(self, cert):
@@ -3465,7 +3469,7 @@ class CardConnector:
             raise CardNotPresentError(f"Error during personalization certificate export: no card present (0x0000)")
         else: 
             logger.error(f"Error during personalization certificate export: (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Error during personalization certificate export: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error during personalization certificate export: (error code {hex(256*sw1+sw2)})", sw1, sw2)
         
         certificate_size= (response[0] & 0xFF)*256 + (response[1] & 0xFF)
         if (certificate_size==0):
@@ -3619,7 +3623,7 @@ class CardConnector:
             raise CardSetupNotDoneError(f"Error while fetching Satodime status: setup not done (code 0x9c04)")
         else: 
             logger.error(f"Error while fetching Satodime status: (error code {hex(256*sw1+sw2)})")
-            raise UnexpectedSW12Error(f"Error while fetching Satodime status: (error code {hex(256*sw1+sw2)})")
+            raise UnexpectedSW12Error(f"Error while fetching Satodime status: (error code {hex(256*sw1+sw2)})", sw1, sw2)
         
         offset=0
         satodime_status={}
