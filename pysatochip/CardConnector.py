@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import base64
 import logging
+import threading
 from os import urandom
 from typing import Union, List, Optional
 
@@ -143,9 +144,11 @@ class RemovalObserver(CardObserver):
                     if (sw1!=0x90 or sw2!=0x00) and (sw1!=0x9C or sw2!=0x04):
                         self.cc.card_disconnect()
                         break
-                    if (self.cc.needs_secure_channel):
-                        self.cc.card_initiate_secure_channel()
-                
+                    # the secure channel is NOT initiated here: it is established
+                    # lazily, in the thread that first sends a command needing it
+                    # (see card_encrypt_secure_channel). Doing it here made this
+                    # monitor thread race with the client thread.
+
                 # todo: skip or not for reset_factory?
                 if self.cc.client is not None:
                     self.cc.client.request('update_status',True)   
@@ -186,7 +189,15 @@ class CardConnector:
         self.setup_done= None
         self.needs_secure_channel= None
         self.mode_factory_reset = False # set to True when performing factory reset
+        # Secure channel. self.sc is either None or a fully initialized channel:
+        # it is built lazily by whichever thread needs it first (see
+        # card_ensure_secure_channel) and published only once complete, so that
+        # no caller can observe a half-initialized channel. _sc_lock serializes
+        # the initiation itself, so the card monitor thread and a client thread
+        # cannot run two 0x81 exchanges against each other.
         self.sc = None
+        self._sc_lock = threading.RLock()
+        self._sc_initializing = False
         # cache PIN
         self.pin_nbr=None
         self.pin=None
@@ -307,6 +318,7 @@ class CardConnector:
         self.needs_2FA = None
         self.setup_done= None
         self.needs_secure_channel= None
+        self.sc= None # a new card needs a new secure channel
         self.card_present= False
         self.card_type= "card"
         if self.cardservice:
@@ -324,7 +336,10 @@ class CardConnector:
 
     def card_select(self):
         logger.debug("In card_select")
-       
+
+        # selecting an applet resets the secure channel on the card side
+        self.sc = None
+
         # if no filter, try all supported applet in this order
         if (self.card_filter==None):
             self.card_filter= ["satochip", "seedkeeper", "satodime", "satocash"]
@@ -2140,30 +2155,67 @@ class CardConnector:
     ###########################################
     
     def card_initiate_secure_channel(self):
+        """Establish a *new* secure channel with the card.
+
+        The channel is built into a local object and published to self.sc only
+        once it is fully usable, so another thread never sees a half-initialized
+        channel. Prefer card_ensure_secure_channel() unless a fresh channel is
+        specifically required (e.g. after the card returns 0x9C21).
+        """
         logger.debug("In card_initiate_secure_channel()")
         cla= JCconstants.CardEdge_CLA
         ins= 0x81
         p1= 0x00 
         p2= 0x00
         
-        # get sc
-        self.sc= SecureChannel(logger.getEffectiveLevel())
-        pubkey= list(self.sc.sc_pubkey_serialized)
-        lc= len(pubkey) #65
-        apdu=[cla, ins, p1, p2, lc] + pubkey
-        
-        # send apdu 
-        response, sw1, sw2 = self.card_transmit(apdu) 
-        
-        # parse response and extract pubkey...
-        peer_pubkey = self.parser.parse_initiate_secure_channel(response)
-        peer_pubkey_bytes= peer_pubkey.get_public_key_bytes(compressed=False)
-        self.sc.initiate_secure_channel(peer_pubkey_bytes)
+        with self._sc_lock:
+            # get sc
+            sc= SecureChannel(logger.getEffectiveLevel())
+            pubkey= list(sc.sc_pubkey_serialized)
+            lc= len(pubkey) #65
+            apdu=[cla, ins, p1, p2, lc] + pubkey
+            
+            # send apdu (ins 0x81 is never encrypted, see card_transmit)
+            self._sc_initializing= True
+            try:
+                response, sw1, sw2 = self.card_transmit(apdu)
+            finally:
+                self._sc_initializing= False
+            
+            # parse response and extract pubkey...
+            peer_pubkey = self.parser.parse_initiate_secure_channel(response)
+            peer_pubkey_bytes= peer_pubkey.get_public_key_bytes(compressed=False)
+            sc.initiate_secure_channel(peer_pubkey_bytes)
+            
+            # publish the channel only once it is complete
+            self.sc= sc
         
         return peer_pubkey             
+    
+    def card_ensure_secure_channel(self):
+        """Initiate the secure channel unless a usable one is already available.
+
+        Idempotent and thread-safe: this is the single entry point through which
+        the channel gets created, so callers never have to set it up themselves.
+        """
+        with self._sc_lock:
+            if (self.sc is not None) and self.sc.initialized_secure_channel:
+                return
+            if self._sc_initializing:
+                # reached only if a command needing encryption is sent from
+                # within the 0x81 exchange itself: initiating again would recurse
+                raise SecureChannelError('Secure channel is being initialized')
+            logger.debug("In card_ensure_secure_channel: no usable secure channel, initiating one")
+            self.card_initiate_secure_channel()
        
     def card_encrypt_secure_channel(self, apdu):
         logger.debug("In card_encrypt_secure_channel()")
+        
+        # every path that needs encryption goes through here (card_transmit,
+        # card_verify_PIN_simple, card_verify_PIN_deprecated), so this is where
+        # the channel is guaranteed to exist
+        self.card_ensure_secure_channel()
+        
         cla= JCconstants.CardEdge_CLA
         ins= 0x82
         p1= 0x00 
@@ -2200,8 +2252,14 @@ class CardConnector:
         if len(ciphertext)!=size:
             logger.warning(f'In card_decrypt_secure_channel: ciphertext has wrong length: expected {str(size)} got {str(len(ciphertext))}')
             raise SecureChannelError('Ciphertext has wrong length!')
-            
-        plaintext= self.sc.decrypt_secure_channel(iv, ciphertext)
+        
+        # take a reference: the channel can be dropped by the card monitor thread
+        # (card removed) between the encrypted command and its response
+        sc= self.sc
+        if (sc is None) or (not sc.initialized_secure_channel):
+            raise SecureChannelError('Secure channel was closed before the response could be decrypted!')
+        
+        plaintext= sc.decrypt_secure_channel(iv, ciphertext)
         
         #log response
         logger.debug( f'Plaintext R-APDU: {toHexString(plaintext)}')

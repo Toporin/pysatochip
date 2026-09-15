@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1]:
+
+Fix: secure channel initialization race
+
+Setting up a card that was not initialized yet failed with `UninitializedSecureChannelError`, raised from
+`card_encrypt_secure_channel` on the first `card_setup()` call.
+
+The secure channel used to be established by the card insertion observer, which runs in the pyscard
+`CardMonitor` thread, while client code ran concurrently after a fixed `time.sleep(1)` that is not long
+enough on a slow reader. `card_initiate_secure_channel()` also assigned `self.sc` *before* the 0x81
+exchange, so for the duration of that round trip `self.sc` was a channel that existed but was not
+initialized -- exactly the state the client thread observed. Clients reaching `card_setup()` first never
+initiated the channel themselves either, while `card_get_status()` had already set `needs_secure_channel`.
+
+The channel is now established lazily, by whichever thread first needs it:
+* `card_encrypt_secure_channel()` calls the new idempotent, thread-safe `card_ensure_secure_channel()`.
+  This is the single point where the channel is actually required, so it also covers
+  `card_verify_PIN_simple()` and `card_verify_PIN_deprecated()`, which transmit directly instead of going
+  through `card_transmit()`.
+* `card_initiate_secure_channel()` builds the channel into a local object and publishes it to `self.sc`
+  only once it is fully usable, under a lock. `self.sc` is therefore always either `None` or a working
+  channel, and two threads can no longer run two 0x81 exchanges against each other. The method stays
+  public and now means "force a fresh channel".
+* The observer no longer initiates the channel.
+* `self.sc` is invalidated in `card_disconnect()` and `card_select()`, since a new card or a re-selected
+  applet resets the card side of the channel.
+
+Callers need no change: the explicit `card_initiate_secure_channel()` calls in `satochip_cli.py` and in the
+test files are now redundant but still correct. The one behaviour change is that a card whose channel
+cannot be established reports the error on the first command that needs encryption, in the caller's thread,
+instead of as a warning logged from the monitor thread at insertion time.
+
+The card wire format is unchanged.
+
 ## [0.18.0]:
 
 Security: remove the `ecdsa` dependency (https://github.com/Toporin/pysatochip/issues/8)

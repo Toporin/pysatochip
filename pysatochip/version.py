@@ -60,7 +60,10 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.18.0: security: drop the ecdsa dependency (CVE-2024-23342). Private-key
 #          operations now use pyca/cryptography, or libsecp256k1 via embit.
 #          Note this reverses the v0.11.2 decision noted above.
+# v0.18.1: fix: establish the secure channel lazily, in the thread that needs it,
+#          instead of in the card monitor thread. Fixes UninitializedSecureChannelError
+#          when setting up a card that is not initialized yet.
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 0
+PYSATOCHIP_REVISION= 1
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
