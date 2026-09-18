@@ -10,8 +10,9 @@
 # v0.12: card label & support for encrypted seed import from SeedKeeper
 # v0.14: Schnorr signatures, nostr event signatures, Liquid-Bitcoin support (export Master Blinding Key)
 # v0.15: support for MuSig2 (WIP)
+# v0.16: major refactoring (WIP)
 SATOCHIP_PROTOCOL_MAJOR_VERSION=0
-SATOCHIP_PROTOCOL_MINOR_VERSION=15
+SATOCHIP_PROTOCOL_MINOR_VERSION=16
 SATOCHIP_PROTOCOL_VERSION= (SATOCHIP_PROTOCOL_MAJOR_VERSION<<8)+SATOCHIP_PROTOCOL_MINOR_VERSION
 
 # SeedKeeper supported version tuple
@@ -63,7 +64,10 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.18.1: fix: establish the secure channel lazily, in the thread that needs it,
 #          instead of in the card monitor thread. Fixes UninitializedSecureChannelError
 #          when setting up a card that is not initialized yet.
+# v0.18.2: fix: card_taproot_tweak_privkey() can now request a key-path-only (BIP86)
+#          tweak, i.e. tweak_size=0, as expected by applet v0.16-0.0. It used to pad a
+#          missing tweak to 32 zero bytes, which is a different (non-BIP341) tweak.
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 1
+PYSATOCHIP_REVISION= 2
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

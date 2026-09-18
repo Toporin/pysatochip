@@ -1524,15 +1524,21 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         return response, sw1, sw2
 
-    def card_taproot_tweak_privkey(self, keynbr, tweak, bypass_flag: bool = False):
+    def card_taproot_tweak_privkey(self, keynbr, tweak=None, bypass_flag: bool = False):
         '''This function tweaks the currently available private stored in the Satochip.
         Tweaking is based on the 'taproot_tweak_seckey(seckey0, h)' algorithm specification defined here:
         https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki#constructing-and-spending-taproot-outputs
 
         Parameters:
         keynbr (int): the key to use (0xFF for bip32 key)
-        tweak (list): the transaction hash
-        bypass_flag (bool): if set to True, key tweaking is bypassed
+        tweak (list | bytes | None): the taproot merkle root h, as 32 bytes.
+            Use None (or an empty value) when the output commits to no script
+            tree, i.e. key-path-only spending as in BIP86: the tagged hash is
+            then computed over x(P) alone.
+            Note that h = None and h = 32 zero bytes are two DIFFERENT tweaks,
+            since BIP341 hashes the concatenation x(P) || h. Only the former
+            gives the standard BIP86 output key.
+        bypass_flag (bool): if set to True, key tweaking is bypassed (Nostr)
 
         returns:
         (response, sw1, sw2)
@@ -1546,10 +1552,11 @@ class CardConnector:
         p2 = 0x00 if not bypass_flag else 0x01
 
         if tweak is None:
-            tweak = 32 * [0] # by default use a 32-byte vector filled with '0x00'
+            tweak = [] # no script tree: only x(P) is hashed (BIP86)
+        tweak = list(tweak)
 
-        if len(tweak) != 32:
-            raise ValueError("Wrong tweak length (should be 32)")
+        if len(tweak) not in (0, 32):
+            raise ValueError(f"Wrong tweak length: {len(tweak)} (should be 32, or 0 for no script tree)")
 
         data = [len(tweak)] + tweak
         lc = len(data)

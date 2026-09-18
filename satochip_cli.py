@@ -1104,6 +1104,9 @@ def satochip_sign_schnorr_hash(hash: str, keyslot, path):
             print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=False).hex()}")
 
         # tweak key
+        # tweak=None means 'no script tree': the BIP341 tagged hash is computed
+        # over x(P) alone, which is the standard key-path-only (BIP86) output
+        # key. Do NOT pass 32 zero bytes here, that is a different tweak.
         tweak = None
         (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=False)
         print(f"pubkey after tweak: {bytes(response).hex()}")

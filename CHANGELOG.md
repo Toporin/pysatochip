@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2]:
+
+Fix: `card_taproot_tweak_privkey()` could not request a key-path-only (BIP86) tweak
+
+BIP341 computes the taproot tweak as `t = tagged_hash("TapTweak", x(P) || h)`, over the **concatenation** of
+the internal key and the merkle root `h`. When the output commits to no script tree -- key-path-only
+spending, as in BIP86 -- `h` is the *empty* byte string and only 32 bytes are hashed. Applet v0.16-0.0
+expresses that as `tweak_size = 0`.
+
+`card_taproot_tweak_privkey()` padded a missing tweak to 32 zero bytes and rejected anything that was not
+exactly 32 bytes long, so it could not send `tweak_size = 0`. Hashing `x(P) || 32 zero bytes` is a different
+tweak: it yields a valid-looking key that is not the BIP86 output key, whose address no standard wallet
+watches and whose coins no standard signer can spend. `satochip_cli.py satochip-sign-schnorr-hash`, which
+passes `tweak=None`, was therefore signing under a non-BIP341 key on a v0.16 card.
+
+`tweak` now accepts `None`/empty for "no script tree" (and is optional, defaulting to `None`), keeps
+accepting 32 bytes for a merkle root, and rejects any other length. Note that `tweak=None` and
+`tweak=32*[0]` are two different tweaks; only the former is BIP86.
+
+This only affects applet v0.16-0.0 and later. Earlier versions computed a non-BIP341 tweak from the XOR of
+`x(P)` and `h`, which coincides with the BIP86 tweak exactly when `h` is all-zero -- so the keys derived by
+the old client on an old applet are the same ones the new client derives on a new applet, and remain
+spendable.
+
+Also adds a test suite for the schnorr/taproot support, in two layers:
+* `tests/test_bip340.py` (offline): pins `tests/bip340_ref.py`, a pure-python BIP340/BIP341 reference built
+  on `ec_math.py`, to the official BIP340, BIP341 and BIP86 vectors (`tests/vectors_bip340.py`).
+* `test_satochip_taproot.py` (needs a card): compares the applet's `TaprootTweakPrivateKey()` and
+  `SignSchnorrHash()` to that reference, covering both tweak shapes, the bypass (Nostr) path, the BIP86
+  derivation end to end, nonce freshness and the input-validation status words.
+
 ## [0.18.1]:
 
 Fix: secure channel initialization race
