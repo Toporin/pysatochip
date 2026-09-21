@@ -719,6 +719,25 @@ class CardConnector:
             logger.info(f"APDU reset transmitted with result code {hex(256*sw1+sw2)}")
         return response, sw1, sw2
 
+    def card_reset_factory_v3(self):
+        """Initiate the Factory Reset Process (version 3)
+        Based on sending one specific APDU once to the card.
+        Supported by Satochip with version >=0.16-0.0.
+        """
+        logger.debug("In card_reset_factory_v3")
+        apdu = [0xB0, 0xFD, 0xAA, 0x55, 0x00]  # Factory Reset v3 APDU
+        (response, sw1, sw2) = self.card_transmit(apdu)
+        if sw1 == 0x90 and sw2 == 0x00:
+            logger.debug("CARD HAS BEEN RESET TO FACTORY!")
+        elif sw1 == 0x9c and sw2 == 0x04:
+            raise CardSetupNotDoneError()
+        elif sw1 == 0x6D and sw2 == 0x00:
+            raise UnsupportedFeatureError()
+        else:
+            raise UnexpectedSW12Error("Unexpected error", sw1, sw1)
+
+        return response, sw1, sw2
+
     ###########################################
     #      Satochip private key commands      #
     ###########################################
@@ -3931,7 +3950,7 @@ class CardSelectError(ApduError):
         super().__init__(message, 0x6A, 0x82, ins)
 
 class CardSetupNotDoneError(ApduError):
-    def __init__(self, message="", ins=0x00):
+    def __init__(self, message="Card setup not done!", ins=0x00):
         super().__init__(message, 0x9c, 0x04, ins)
 
 class IncorrectP1Error(ApduError):
@@ -3939,7 +3958,7 @@ class IncorrectP1Error(ApduError):
         super().__init__(message, 0x9c, 0x10, ins)
 
 class UnsupportedFeatureError(ApduError):
-    def __init__(self, message="", ins=0x00):
+    def __init__(self, message="Unsupported feature!", ins=0x00):
         super().__init__(message, 0x6d, 0x00, ins)
 
 # Satodime
