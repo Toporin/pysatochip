@@ -2129,14 +2129,46 @@ class CardConnector:
 
         return (response, sw1, sw2)      
 
-    def card_unblock_PIN(self, pin_nbr, ublk):
+    def card_unblock_PIN(self, pin_nbr, ublk, new_pin=None):
+        """Unblock a blocked PIN using the corresponding unblock code (PUK).
+
+        Parameters:
+            pin_nbr (int): the PIN number to unblock (0x00-0x07)
+            ublk (list of int): the PUK bytes
+            new_pin (list of int | None): optional new PIN value. Only supported by
+                Satochip applet v0.16-0.0 and above: if provided, the PIN is set to
+                this value when unblocking; otherwise it keeps its previous value.
+
+        returns: (response, sw1, sw2)
+        """
         logger.debug("In card_unblock_PIN")
         cla= JCconstants.CardEdge_CLA
         ins= JCconstants.INS_UNBLOCK_PIN
         p1= pin_nbr
         p2= 0x00
-        lc= len(ublk)
-        apdu=[cla, ins, p1, p2, lc] + ublk
+        # Satochip applet v0.16-0.0 introduced a backward-incompatible UnblockPIN format:
+        # the PUK is prefixed with its size and a new PIN can optionally be provided:
+        #     data= [PUK_size(1b) | PUK | (optional) PIN_size(1b) | (optional) PIN]
+        # Older Satochip versions and the other applets (SeedKeeper, Satodime, Satocash)
+        # use the legacy format: data= [PUK].
+        use_new_format= False
+        if (self.card_type=="Satochip"):
+            if not self.protocol_version:
+                # protocol_version is cached by card_get_status(); if it is not cached
+                # yet, fetch it from the card (GET STATUS is always accepted, even
+                # before setup). If the fetch fails, fall back to the legacy format.
+                self.card_get_status()
+            use_new_format= ((self.protocol_version or 0) >= (0<<8)+16) # v0.16-0.0 & above
+        if use_new_format:
+            data= [len(ublk)] + ublk
+            if new_pin is not None:
+                data+= [len(new_pin)] + new_pin
+        else:
+            if new_pin is not None:
+                raise ValueError("Setting a new PIN while unblocking is only supported for Satochip v0.16-0.0 and above")
+            data= ublk
+        lc= len(data)
+        apdu=[cla, ins, p1, p2, lc] + data
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         
