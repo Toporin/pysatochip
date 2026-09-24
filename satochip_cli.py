@@ -587,9 +587,9 @@ def common_import_perso_certificate(cert, cert_file):
 @main.command()
 def common_export_perso_certificate():
     """Export the personalisation certificate that is on the device"""
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
+    # if cc.card_get_status()[3]['setup_done'] == False:
+    #     print("Unable to perform this function until setup is complete")
+    #     return
     try:
         # PIN required except for satodime
         if cc.card_type != "Satodime":
@@ -632,9 +632,9 @@ def common_import_ndef_authentikey(privkey):
 @main.command()
 @click.option("--backend", type=click.Choice(["auto", "openssl", "pycryptodomex"]), default="auto", help="Certificate validation backend")
 def common_verify_authenticity(backend):
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
+    # if cc.card_get_status()[3]['setup_done'] == False:
+    #     print("Unable to perform this function until setup is complete")
+    #     return
 
     """Verify the authenticy of the currently connected card"""
     try:
