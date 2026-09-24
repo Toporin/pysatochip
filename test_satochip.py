@@ -253,6 +253,7 @@ class SatochipTest(unittest.TestCase):
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
                 # test LTC msg signing
+                print("Signing message " + str(i) + " for Litecoin: " + msgs[i] + "...")
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=b'', altcoin="Litecoin")
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
@@ -293,7 +294,7 @@ class SatochipTest(unittest.TestCase):
                     8*"The quick brown fox jumps over the lazy dog"]
         for i in range(0, len(msgs)):
             with self.subTest(i=i):
-                print("Signing message "+str(i)+" : "+msgs[i] + "...")
+                print("Signing message "+str(i)+" with 2FA code: "+msgs[i] + "...")
                 msg=msgs[i]
                 #todo: compute hmac
                 paddedmsghash = sha256( msg_magic(msg.encode('utf-8')) ).hexdigest()
@@ -304,6 +305,7 @@ class SatochipTest(unittest.TestCase):
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
                 # with wrong hmac it should not work
+                print("2FA - Signing message " + str(i) + " with wrong 2FA code: " + msgs[i] + "...")
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=bytes(20), altcoin=None)
                 self.assertEqual(compsig, b'')
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9C0B) )
