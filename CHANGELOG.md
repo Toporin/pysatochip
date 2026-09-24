@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.3]:
+
+Change: message and transaction signing now use SignTransactionHash (ins 0x7A)
+
+Applet v0.16-0.0 removes the ParseTransaction (0x71), SignTransaction (0x6F) and SignMessage
+(0x6E) commands -- they now return SW_INS_DEPRECATED (0x9C26). The hashing these commands
+performed on-card is now done client-side, and the resulting hash is signed with the
+SignTransactionHash command (0x7A). Since 0x7A has existed since applet v0.10 and the card
+used to sign sha256(preimage) -- exactly the double hash now sent to it -- the signatures
+are the same and behavior is identical on older applets:
+
+* `card_sign_message()` computes `sha256d(msg_magic(message, altcoin))` itself and signs it
+  with a single APDU instead of the chunked INIT/PROCESS/FINALIZE flow; the compact
+  signature recovery is unchanged.
+* `card_parse_transaction()` no longer exchanges APDUs: it hashes the (prepared) transaction
+  locally with `TxParser` -- the same double-sha256 of the sighash preimage (legacy, or
+  BIP143 for segwit) that the card used to compute -- and returns it with `needs_2fa` (now
+  simply whether 2FA is enabled). The return-tuple contract is unchanged, so callers such as
+  Electrum need no modification. Note that the card can no longer attest the hash with its
+  authentikey: the client is solely responsible for building the correct preimage.
+* `card_sign_transaction()` delegates to `card_sign_transaction_hash()`.
+
+Two 2FA challenge formats change as a consequence (the library only relays the hmac; the 2FA
+app/server must be updated):
+
+* message signing: hmac-sha1 of `[sha256d(msg_magic) | 32-byte 0xCC-padding]` (was a single
+  sha256 with 0xBB-padding);
+* transaction signing: hmac-sha1 of `[txhash | 32-byte 0xCC-padding]` (was 0x00-padding).
+
+Also, the 2FA amount-limit exemption disappears: SignTransactionHash always requires the hmac
+when 2FA is enabled (the on-card amount accounting was removed with ParseTransaction).
+The 2FA test in `test_satochip.py` builds the new message-signing challenge accordingly, and
+the deprecated INS constants are kept, marked as such, in `JCconstants.py`.
+
+Change: `card_unblock_PIN()` supports the new UnblockPIN format of Satochip applet v0.16-0.0
+
+Satochip applet v0.16-0.0 changed the UnblockPIN command (0x46) in a backward-incompatible
+way: the PUK is now prefixed with its size and a new PIN can optionally be set in the same
+command (`data = [PUK_size(1b) | PUK | (optional) PIN_size(1b) | (optional) PIN]`, previously
+just `[PUK]`). `card_unblock_PIN()` picks the format based on the card type and the cached
+protocol version -- calling `card_get_status()` first when the version is not cached yet.
+The new format is only used for Satochip v0.16-0.0 and above; older Satochip versions and
+the SeedKeeper, Satodime and Satocash applets keep the legacy format. The optional new PIN
+is exposed through a new `new_pin` parameter (rejected with ValueError on cards that do not
+support it).
+
+Feat: `card_reset_factory_v3()` resets a Satochip v0.16-0.0+ card to factory with a single APDU
+
+The applet replaced the legacy reset-to-factory procedure (power-cycling the card a fixed
+number of times with a specific APDU in between) with a single command (ins 0xFD, p1 0xAA,
+p2 0x55) that also restores the PIN/PUK try counters, so the card can be set up again
+afterwards. The new `card_reset_factory_v3()` sends it, and the CLI's `common-reset-factory`
+uses it for Satochip v0.16-0.0 and above (the older Satochip procedure and the
+SeedKeeper/Satocash one were renamed v1/v2 for clarity).
+
+Misc:
+
+* CLI: `common-verify-authenticity` and `common-export-perso-certificate` no longer abort
+  when setup is not done: Satochip v0.16+ does not require the PIN to check authenticity or
+  export the personalization certificate.
+* README now documents the schnorr/taproot test suites (offline `tests/test_bip340.py` and
+  the four hardware suites, including the destructive-operation warnings).
+* Added `AGENTS.md`, guidance for AI coding agents working on this repository.
+
 ## [0.18.2]:
 
 Fix: `card_taproot_tweak_privkey()` could not request a key-path-only (BIP86) tweak

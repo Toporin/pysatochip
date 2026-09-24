@@ -1309,11 +1309,20 @@ class CardConnector:
         Message is prepended with a specific header as described here:
         https://bitcoin.stackexchange.com/questions/77324/how-are-bitcoin-signed-messages-generated
         
+        The dedicated SignMessage command (ins 0x6E) is deprecated since applet
+        v0.16-0.0 (it returns 0x9C26): the message hash is now computed
+        client-side and signed with the SignTransactionHash command (ins 0x7A),
+        which is supported by all applets since v0.10.
+        
         Parameters: 
         keynbr (int): the key to use (0xFF for bip32 key)
         pubkey (ECPubkey): the pubkey used for signing; this is used for key recovery
         message (str | bytes): the message to sign
-        hmac: the 20-byte hmac code required if 2FA is enabled
+        hmac: the 20-byte hmac code required if 2FA is enabled.
+            Note: with SignTransactionHash, the 2FA challenge is the hmac-sha1 of
+            [sha256d(msg_magic(message, altcoin)) | 32-byte 0xCC-padding]
+            (the deprecated SignMessage command used a single sha256 hash and a
+            0xBB-padding instead).
         altcoin (str | bytes): for altcoin signing
         
         Returns: 
@@ -1327,122 +1336,71 @@ class CardConnector:
         if (type(altcoin)==str):
             altcoin = altcoin.encode('utf8')
             
-        # return signature as byte array
-        # data is cut into chunks, each processed in a different APDU call
-        chunk= 128 # max APDU data=255 => chunk<=255-(4+2)
-        buffer_offset=0
-        buffer_left=len(message)
-
-        # CIPHER_INIT - no data processed
-        cla= JCconstants.CardEdge_CLA
-        ins= JCconstants.INS_SIGN_MESSAGE
-        p1= keynbr # 0xff=>BIP32 otherwise STD
-        p2= JCconstants.OP_INIT
-        lc= 0x4  if not altcoin else (0x4+0x1+len(altcoin))
-        apdu=[cla, ins, p1, p2, lc]
-        for i in reversed(range(4)):
-            apdu+= [((buffer_left>>(8*i)) & 0xff)]
-        if altcoin:
-            apdu+= [len(altcoin)]
-            apdu+=altcoin
-
-        # send apdu
-        (response, sw1, sw2) = self.card_transmit(apdu)
-
-        # CIPHER PROCESS/UPDATE (optionnal)
-        while buffer_left>chunk:
-            #cla= JCconstants.CardEdge_CLA
-            #ins= INS_COMPUTE_CRYPT
-            #p1= key_nbr
-            p2= JCconstants.OP_PROCESS
-            lc= 2+chunk
-            apdu=[cla, ins, p1, p2, lc]
-            apdu+=[((chunk>>8) & 0xFF), (chunk & 0xFF)]
-            apdu+= message[buffer_offset:(buffer_offset+chunk)]
-            buffer_offset+=chunk
-            buffer_left-=chunk
-            # send apdu
-            response, sw1, sw2 = self.card_transmit(apdu)
-
-        # CIPHER FINAL/SIGN (last chunk)
-        chunk= buffer_left #following while condition, buffer_left<=chunk
-        #cla= JCconstants.CardEdge_CLA
-        #ins= INS_COMPUTE_CRYPT
-        #p1= key_nbr
-        p2= JCconstants.OP_FINALIZE
-        lc= 2+chunk+ len(hmac)
-        apdu=[cla, ins, p1, p2, lc]
-        apdu+=[((chunk>>8) & 0xFF), (chunk & 0xFF)]
-        apdu+= message[buffer_offset:(buffer_offset+chunk)]+hmac
-        buffer_offset+=chunk
-        buffer_left-=chunk
-        # send apdu
-        response, sw1, sw2 = self.card_transmit(apdu)
+        # compute the message hash client-side, as done inside the card previously
+        hash = sha256d(msg_magic(message, altcoin))
+        # sign the hash with the SignTransactionHash command (ins 0x7A)
+        chalresponse= list(hmac) if hmac else None
+        (response, sw1, sw2) = self.card_sign_transaction_hash(keynbr, list(hash), chalresponse)
         
         # parse signature from response
         if (sw1!=0x90 or sw2!=0x00):
             logger.warning(f"Unexpected error in card_sign_message() (error code {hex(256*sw1+sw2)})") #debugSatochip
             compsig=b''
         else:
-            # Prepend the message for signing as done inside the card!!
-            hash = sha256d(msg_magic(message, altcoin))
             compsig=self.parser.parse_message_signature(response, hash, pubkey)
                 
         return (response, sw1, sw2, compsig)
 
     def card_parse_transaction(self, transaction: bytes, is_segwit=False):
-        ''' Parse a transaction to be signed by the device
+        ''' Compute the transaction hash (sighash) to be signed by the device
+        
+        The dedicated ParseTransaction command (ins 0x71) is deprecated since
+        applet v0.16-0.0 (it returns 0x9C26): the transaction is now parsed and
+        hashed client-side and no APDU is exchanged with the card. The hash
+        returned here is the same double-sha256 of the sighash preimage that
+        the card used to compute (legacy sighash algorithm, or BIP143 for
+        segwit); it can be signed with card_sign_transaction() /
+        card_sign_transaction_hash().
+        
+        Note: since the card no longer parses the transaction, it cannot attest
+        the hash with its authentikey anymore: the client is solely responsible
+        for building the correct preimage. For legacy transactions, this is the
+        prepared transaction (with the scriptCode of the input to sign in place
+        of its scriptSig, the locktime and the 4-byte sighash type appended);
+        for segwit, the BIP143 preimage.
         
         Parameters: 
-        transaction (bytes): the transaction to parse
+        transaction (bytes): the transaction (or BIP143 preimage for segwit) to hash
         is_segwit (bool)
         
         Returns: 
         (response, sw1, sw2, tx_hash, needs_2fa)
-        tx_hash (list): hash as computed by the device
-        needs_2FA (bool): whether 2FA is required
+        response (list): empty, no APDU is sent anymore
+        sw1, sw2 (int): always (0x90, 0x00), no APDU is sent anymore
+        tx_hash (list): hash as computed locally (same value as returned by the device previously)
+        needs_2FA (bool): whether 2FA is enabled (and thus required for signing)
         '''
         logger.debug("In card_parse_transaction")
-        cla= JCconstants.CardEdge_CLA
-        ins= JCconstants.INS_PARSE_TRANSACTION
-        p1= JCconstants.OP_INIT
-        p2= 0X01 if is_segwit else 0x00
 
-        # init transaction data and context
+        # parse the transaction locally: TxParser accumulates the single and
+        # double sha256 of the preimage while chunking it
         txparser= TxParser(transaction)
         while not txparser.is_parsed():
-
-            chunk= txparser.parse_segwit_transaction() if is_segwit else txparser.parse_transaction()
-            lc= len(chunk)
-            apdu=[cla, ins, p1, p2, lc]
-            apdu+=chunk
-
-            # log state & send apdu
-            #if (txparser.is_parsed():
-                #lc= 86 # [hash(32) | sigsize(2) | sig | nb_input(4) | nb_output(4) | coord_actif_input(4) | amount(8)]
-                #logCommandAPDU("cardParseTransaction - FINISH",cla, ins, p1, p2, data, lc)
-            #elif p1== JCconstants.OP_INIT:
-                #logCommandAPDU("cardParseTransaction-INIT",cla, ins, p1, p2, data, lc)
-            #elif p1== JCconstants.OP_PROCESS:
-                #logCommandAPDU("cardParseTransaction - PROCESS",cla, ins, p1, p2, data, lc)
-
-            # send apdu
-            response, sw1, sw2 = self.card_transmit(apdu)
-
-            # switch to process mode after initial call to parse
-            p1= JCconstants.OP_PROCESS
+            if is_segwit:
+                txparser.parse_segwit_transaction()
+            else:
+                txparser.parse_transaction()
+        tx_hash= list(txparser.get_tx_double_hash())
+        needs_2fa= bool(self.needs_2FA)
         
-        #parse response
-        (tx_hash, needs_2fa)= self.parser.parse_parse_transaction(response)
-        
-        return (response, sw1, sw2, tx_hash, needs_2fa)
+        return ([], 0x90, 0x00, tx_hash, needs_2fa)
 
     def card_sign_transaction(self, keynbr, txhash, chalresponse):
-        ''' Sign the transaction in the device
+        ''' Sign the transaction hash in the device
         
         Parameters: 
         keynbr (int): the key to use (0xFF for bip32 key)
-        txhash (list): the transaction hash as returned by the device
+        txhash (list): the transaction hash, as computed by card_parse_transaction()
         chalresponse (list): the hmac code if 2FA is enabled
         
         Returns: 
@@ -1450,27 +1408,13 @@ class CardConnector:
         response (list): the signature in DER format
         '''
         logger.debug("In card_sign_transaction")
-        #if (type(chalresponse)==str):
-        #    chalresponse = list(bytes.fromhex(chalresponse))
-        cla= JCconstants.CardEdge_CLA
-        ins= JCconstants.INS_SIGN_TRANSACTION
-        p1= keynbr
-        p2= 0x00
-
-        if len(txhash)!=32:
-            raise ValueError("Wrong txhash length: " + str(len(txhash)) + "(should be 32)")
-        elif chalresponse==None:
-            data= txhash
-        else:
-            if len(chalresponse)!=20:
-                raise ValueError("Wrong Challenge response length:"+ str(len(chalresponse)) + "(should be 20)")
-            data= txhash + list(bytes.fromhex("8000")) + chalresponse  # 2 middle bytes for 2FA flag
-        lc= len(data)
-        apdu=[cla, ins, p1, p2, lc]+data
-
-        # send apdu
-        response, sw1, sw2 = self.card_transmit(apdu)
-        return (response, sw1, sw2)
+        # The dedicated SignTransaction command (ins 0x6F) is deprecated since
+        # applet v0.16-0.0 (it returns 0x9C26); SignTransactionHash (ins 0x7A)
+        # signs the same hash directly, without comparing it to a card-cached
+        # hash. Note that the 2FA challenge must follow the SignTransactionHash
+        # rule: hmac-sha1 of [txhash | 32-byte 0xCC-padding] (the deprecated
+        # SignTransaction command used a 0x00-padding instead).
+        return self.card_sign_transaction_hash(keynbr, txhash, chalresponse)
     
     def card_sign_transaction_hash(self, keynbr, txhash, chalresponse):
         ''' Sign the transaction hash in the device

@@ -218,10 +218,12 @@ class JCconstants:
     INS_BIP32_RESET_SEED=  0x77;
     INS_BIP32_GET_AUTHENTIKEY=  0x73;
     INS_BIP32_GET_EXTENDED_KEY=  0x6D;
+    INS_BIP32_SET_EXTENDED_KEY=  0x70;
+    # deprecated since applet v0.16-0.0 (return SW_INS_DEPRECATED 0x9C26):
+    # hashing is done client-side and the hash is signed with SignTransactionHash (0x7A)
     INS_SIGN_MESSAGE=  0x6E;
     INS_SIGN_SHORT_MESSAGE=  0x72;
     INS_SIGN_TRANSACTION=  0x6F;
-    INS_BIP32_SET_EXTENDED_KEY=  0x70;
     INS_PARSE_TRANSACTION =  0x71;
 
     # 2FA

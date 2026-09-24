@@ -67,7 +67,11 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.18.2: fix: card_taproot_tweak_privkey() can now request a key-path-only (BIP86)
 #          tweak, i.e. tweak_size=0, as expected by applet v0.16-0.0. It used to pad a
 #          missing tweak to 32 zero bytes, which is a different (non-BIP341) tweak.
+# v0.18.3: change: sign messages and transactions with SignTransactionHash (0x7A)
+#          instead of the SignMessage/SignTransaction/ParseTransaction commands
+#          removed in applet v0.16-0.0; support the new UnblockPIN format of
+#          Satochip applet v0.16-0.0 and factory reset v3 (single APDU).
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 2
+PYSATOCHIP_REVISION= 3
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

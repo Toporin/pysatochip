@@ -25,13 +25,13 @@ import hmac
 import logging
 import unittest
 from os import urandom
-from hashlib import sha1, sha256
+from hashlib import sha1
 
 from pysatochip.CardConnector import CardConnector, UninitializedSeedError, SeedKeeperError
 from pysatochip.JCconstants import JCconstants
 from pysatochip.Satochip2FA import Satochip2FA
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-from pysatochip.util import msg_magic
+from pysatochip.util import msg_magic, sha256d
 
 # import unittest
 # from unittest.mock import MagicMock
@@ -296,9 +296,11 @@ class SatochipTest(unittest.TestCase):
             with self.subTest(i=i):
                 print("Signing message "+str(i)+" with 2FA code: "+msgs[i] + "...")
                 msg=msgs[i]
-                #todo: compute hmac
-                paddedmsghash = sha256( msg_magic(msg.encode('utf-8')) ).hexdigest()
-                challenge= paddedmsghash + 32*"BB"
+                # compute hmac: since message signing now goes through the
+                # SignTransactionHash command (ins 0x7A), the 2FA challenge is the
+                # hmac-sha1 of [sha256d(msg_magic(msg)) | 32-byte 0xCC-padding]
+                msghash = sha256d( msg_magic(msg.encode('utf-8')) ).hex()
+                challenge= msghash + 32*"CC"
                 mac = hmac.new(secret_2FA, bytes.fromhex(challenge), sha1).digest()
                 
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=mac, altcoin=None)
