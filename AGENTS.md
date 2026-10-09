@@ -12,7 +12,7 @@ clients such as Electrum and Electrum forks, plus a bundled command-line tool (`
 
 - License: LGPL v3 (some files carry Apache-2.0 or MIT-style Electrum headers; keep them intact)
 - Python: >= 3.6 (per `setup.py`); developed and tested on CPython 3.12
-- Package on PyPI: `pysatochip`; current version lives in `pysatochip/version.py` (0.18.2)
+- Package on PyPI: `pysatochip`; current version lives in `pysatochip/version.py` (0.18.4)
 - Upstream: https://github.com/Toporin/pysatochip
 
 ## Repository layout
