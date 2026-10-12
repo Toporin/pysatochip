@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.4]:
+
+Fix: restore the derived keys when the card has lost them (applet v0.16-0.0)
+
+Since applet v0.16-0.0, the BIP32 extended key (keynbr 0xFF) and the taproot tweaked key are
+transient: the card clears them on deselect and card reset, for instance when another
+application selects another applet through the same reader. `card_transmit()` already hides
+such a reset: it opens a new secure channel (0x9C21) and verifies the cached PIN (0x9C06),
+then resends the command. With older applets, which kept the keys in flash, the command then
+succeeded with the key derived in the previous session; with v0.16-0.0 it fails with
+SW_INCORRECT_INITIALIZATION (0x9C13).
+
+`card_sign_transaction_hash()` (hence `card_sign_message()` and `card_sign_transaction()`)
+and `card_taproot_tweak_privkey()` with keynbr 0xFF, and `card_sign_schnorr_hash()`, now
+replay the last derivation (and the last tweak for schnorr) made through the CardConnector
+when the card returns 0x9C13, then resend the command once. The replay is only accepted if
+the card returns the same public key (and chaincode) as the first time: a key is never
+restored on another card or from another seed. Otherwise, the 0x9C13 status is returned to
+the caller as before, with a log message: the key must be derived again in the same card
+session. Both keys are restored together, so the BIP32 key derived last is still the one used
+with keynbr 0xFF after a schnorr signature.
+
+Clients that derive the key just before signing (Electrum-Satochip, satochip-cli) are not
+otherwise affected. MuSig2 is not covered: the card keeps the encrypted secnonce sent by
+`card_musig2_sign_hash()` in a buffer cleared on deselect too, so the whole signature must be
+restarted after a reset. Offline tests: `tests/test_derived_key_recovery.py`.
+
 ## [0.18.3]:
 
 Change: message and transaction signing now use SignTransactionHash (ins 0x7A)

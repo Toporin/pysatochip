@@ -19,6 +19,7 @@ import hmac
 import base64
 import logging
 import threading
+from collections import namedtuple
 from os import urandom
 from typing import Union, List, Optional
 
@@ -72,6 +73,11 @@ XPRV_HEADERS_TESTNET = {
         'p2wpkh':      '045f18bc',  # vprv
         'p2wsh':       '02575048',  # Vprv
     }
+
+# a key derived (or tweaked) through the CardConnector, as returned by the card,
+# replayed if the card loses it (see CardConnector._restore_derived_keys)
+Bip32Derivation = namedtuple('Bip32Derivation', 'path sid option_flags pubkey chaincode')
+TaprootTweak = namedtuple('TaprootTweak', 'keynbr tweak bypass_flag derivation tweaked_pubkey')
 
 # simple observer that will print on the console the card connection events.
 class LogCardConnectionObserver(CardConnectionObserver):
@@ -215,6 +221,10 @@ class CardConnector:
         self.feature_schnorr_policy = None
         self.feature_nostr_policy = None
         self.feature_liquid_policy = None
+        # last BIP32 derivation and taproot tweak, replayed if the card loses the derived keys
+        # (see _restore_derived_keys)
+        self._last_bip32_derivation = None # Bip32Derivation
+        self._last_taproot_tweak = None # TaprootTweak
 
 
         # cardservice
@@ -1197,6 +1207,10 @@ class CardConnector:
                         response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
 
                     (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
+                    if sid is None:
+                        # the card now holds this key for signing with keynbr 0xFF
+                        self._last_bip32_derivation= Bip32Derivation(bytes(path), sid, option_flags,
+                            pubkey.get_public_key_bytes(compressed=True), bytes(chaincode))
                     return (pubkey, chaincode)
                 else: # BIP32 privkey
                     (privkey, chaincode)= self.parser.parse_bip32_get_extended_privkey(response)
@@ -1449,6 +1463,10 @@ class CardConnector:
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
+        # the card may have lost the BIP32 key: derive it again, then resend
+        if keynbr == 0xFF and (256*sw1+sw2) == JCconstants.SW_INCORRECT_INITIALIZATION:
+            if self._restore_derived_keys():
+                response, sw1, sw2 = self.card_transmit(apdu)
         return response, sw1, sw2
 
     def card_sign_schnorr_hash(self, keynbr, txhash, chalresponse):
@@ -1485,6 +1503,10 @@ class CardConnector:
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
+        # the card may have lost the tweaked key: tweak it again, then resend
+        if (256*sw1+sw2) == JCconstants.SW_INCORRECT_INITIALIZATION:
+            if self._restore_derived_keys(with_tweak=True):
+                response, sw1, sw2 = self.card_transmit(apdu)
         return response, sw1, sw2
 
     def card_taproot_tweak_privkey(self, keynbr, tweak=None, bypass_flag: bool = False):
@@ -1527,7 +1549,93 @@ class CardConnector:
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
+        # the card may have lost the BIP32 key: derive it again, then resend
+        if keynbr == 0xFF and (256*sw1+sw2) == JCconstants.SW_INCORRECT_INITIALIZATION:
+            if self._restore_derived_keys():
+                response, sw1, sw2 = self.card_transmit(apdu)
+        if (sw1==0x90) and (sw2==0x00):
+            # response: [pubkey_size(2b) | pubkey(65b) | sig_size(2b) | authentikey_sig]
+            derivation = self._last_bip32_derivation if keynbr == 0xFF else None
+            self._last_taproot_tweak = TaprootTweak(keynbr, tweak, bypass_flag, derivation, bytes(response[0:67]))
         return response, sw1, sw2
+
+    def _restore_derived_keys(self, with_tweak=False):
+        ''' Derives again the BIP32 key, and tweaks again the taproot key if with_tweak is set,
+        after the card has lost them.
+
+        Since applet v0.16-0.0, the BIP32 extended key (keynbr 0xFF) and the taproot tweaked
+        key are transient: they are cleared when the applet is deselected or the card is reset,
+        e.g. when another application uses the reader. card_transmit() then silently opens a
+        new secure channel and verifies the cached PIN, but a command using these keys fails
+        with SW_INCORRECT_INITIALIZATION (0x9C13). Older applets kept the keys in flash, so the
+        command used to succeed with the key derived in the previous session.
+
+        The last derivation (and tweak) made through this CardConnector is replayed. It is only
+        accepted if the card returns the same public key as the first time, so that a key is
+        never restored on another card or from another seed. Both keys are cleared together,
+        so both are restored: the BIP32 key derived last stays the one used with keynbr 0xFF.
+
+        Returns True if the card holds the same keys as before: the caller can then resend its
+        command. Otherwise, the key must be derived again (card_bip32_get_extendedkey), and
+        tweaked again for schnorr signatures, in the same card session.
+        '''
+        last_derivation = self._last_bip32_derivation
+        last_tweak = self._last_taproot_tweak
+
+        if (last_tweak if with_tweak else last_derivation) is None:
+            restored = False # nothing was derived (or tweaked) through this CardConnector
+        else:
+            try:
+                card_derivation = None # the BIP32 key held by the card
+                restored = True
+                if with_tweak:
+                    restored = self._replay_taproot_tweak(last_tweak)
+                    card_derivation = last_tweak.derivation # derived again for keynbr 0xFF
+                if restored and last_derivation is not None and last_derivation != card_derivation:
+                    restored = self._replay_bip32_derivation(last_derivation)
+            finally:
+                # the replay records its own derivation and tweak: keep those of the client
+                self._last_bip32_derivation = last_derivation
+                self._last_taproot_tweak = last_tweak
+
+        if restored:
+            logger.info("The card had lost the derived keys (0x9C13): restored")
+        else:
+            logger.warning("The card has no derived key (0x9C13): derive the key "
+                           + ("and tweak it " if with_tweak else "")
+                           + "in the same card session before signing")
+        return restored
+
+    def _replay_bip32_derivation(self, derivation):
+        ''' Derives again a recorded Bip32Derivation, and checks that the card returns the same
+        pubkey and chaincode. Returns True on success.
+        '''
+        try:
+            (pubkey, chaincode) = self.card_bip32_get_extendedkey(
+                derivation.path, derivation.sid, derivation.option_flags)
+        except UnexpectedSW12Error as e:
+            logger.warning(f"The BIP32 key could not be derived again: {e}")
+            return False
+        if pubkey.get_public_key_bytes(compressed=True) != derivation.pubkey or bytes(chaincode) != derivation.chaincode:
+            logger.warning("The BIP32 key could not be derived again: the card returned another pubkey")
+            return False
+        return True
+
+    def _replay_taproot_tweak(self, tweak):
+        ''' Tweaks again a recorded TaprootTweak (deriving its BIP32 key again first, for
+        keynbr 0xFF), and checks that the card returns the same tweaked pubkey.
+        Returns True on success.
+        '''
+        if tweak.keynbr == 0xFF:
+            if tweak.derivation is None: # the key was not derived through this CardConnector
+                return False
+            if not self._replay_bip32_derivation(tweak.derivation):
+                return False
+        (response, sw1, sw2) = self.card_taproot_tweak_privkey(tweak.keynbr, tweak.tweak, tweak.bypass_flag)
+        if (sw1!=0x90) or (sw2!=0x00) or bytes(response[0:67]) != tweak.tweaked_pubkey:
+            logger.warning("The taproot tweak could not be done again")
+            return False
+        return True
 
     def card_musig2_generate_nonce(self, keynbr: int, aggpk: Optional[bytes], msg: Optional[bytes], extra: Optional[bytes]):
         '''This function generate a MuSig2 nonce for the currently available private key stored in the Satochip.

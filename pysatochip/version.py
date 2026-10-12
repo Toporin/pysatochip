@@ -71,7 +71,9 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 #          instead of the SignMessage/SignTransaction/ParseTransaction commands
 #          removed in applet v0.16-0.0; support the new UnblockPIN format of
 #          Satochip applet v0.16-0.0 and factory reset v3 (single APDU).
+# v0.18.4: fix: derive (and tweak) the key again and resend the command when the card
+#          returns 0x9C13 because it lost its transient derived keys (applet v0.16-0.0).
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 3
+PYSATOCHIP_REVISION= 4
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
