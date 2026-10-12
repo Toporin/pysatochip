@@ -25,13 +25,13 @@ import hmac
 import logging
 import unittest
 from os import urandom
-from hashlib import sha1, sha256
+from hashlib import sha1
 
 from pysatochip.CardConnector import CardConnector, UninitializedSeedError, SeedKeeperError
 from pysatochip.JCconstants import JCconstants
 from pysatochip.Satochip2FA import Satochip2FA
 from pysatochip.version import SATOCHIP_PROTOCOL_MAJOR_VERSION, SATOCHIP_PROTOCOL_MINOR_VERSION, SATOCHIP_PROTOCOL_VERSION
-from pysatochip.util import msg_magic
+from pysatochip.util import msg_magic, sha256d
 
 # import unittest
 # from unittest.mock import MagicMock
@@ -43,6 +43,7 @@ from pysatochip.util import msg_magic
 # from .satochip import bip32path2bytes, SatochipClient
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
+#logging.basicConfig(level=logging.DEBUG, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s') # for detailed logs
 logger = logging.getLogger(__name__)
 logger.warning("loglevel: "+ str(logger.getEffectiveLevel()) )
 
@@ -71,8 +72,6 @@ class SatochipTest(unittest.TestCase):
                 v_supported= SATOCHIP_PROTOCOL_VERSION 
                 v_applet= d["protocol_version"] 
                 logger.info(f"SeedKeeper version={v_applet} Electrum supported version= {v_supported}") #debugSatochip
-                if (cls.cc.needs_secure_channel):
-                    cls.cc.card_initiate_secure_channel()
                 break 
                 
             # setup device (done only once)
@@ -124,11 +123,27 @@ class SatochipTest(unittest.TestCase):
     
     # setup
     def setUp(self):
+        # the applet logs the user out after a seed reset, so the PIN is
+        # verified again before each test
         (response, sw1, sw2)= SatochipTest.cc.card_verify_PIN_deprecated(0, SatochipTest.pin)
         self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
         
         # todo: check card type!
         self.assertEqual(SatochipTest.cc.card_type, "Satochip")
+    
+    def tearDown(self):
+        # Leave the card unseeded whatever the test did, so that a test failing
+        # before its own card_reset_seed() does not cascade into the next one as
+        # 'card is already seeded' (0x9C17). Errors here are logged rather than
+        # raised, so they cannot mask the failure of the test itself.
+        try:
+            SatochipTest.cc.card_get_status() # refresh is_seeded
+            if SatochipTest.cc.is_seeded:
+                (response, sw1, sw2)= SatochipTest.cc.card_reset_seed(SatochipTest.pin)
+                if sw1!=0x90 or sw2!=0x00:
+                    logger.warning(f"In tearDown: unable to reset the seed (sw12={hex(sw1)} {hex(sw2)})")
+        except Exception as ex:
+            logger.warning(f"In tearDown: error while resetting the seed: {repr(ex)}")
         
     # BIP32 
     
@@ -238,6 +253,7 @@ class SatochipTest(unittest.TestCase):
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
                 # test LTC msg signing
+                print("Signing message " + str(i) + " for Litecoin: " + msgs[i] + "...")
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=b'', altcoin="Litecoin")
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
@@ -262,8 +278,8 @@ class SatochipTest(unittest.TestCase):
             authentikey= SatochipTest.cc.card_bip32_import_seed(seed) 
         else:
             authentikey= SatochipTest.authentikey
-        print("AUTHENTIKEY: " + str(authentikey))
-        
+        print("AUTHENTIKEY: " + str(authentikey.get_public_key_hex()))
+
         # get extended key
         path= "m/0'/1"
         (childkey, childchaincode)=SatochipTest.cc.card_bip32_get_extendedkey(path)
@@ -278,17 +294,20 @@ class SatochipTest(unittest.TestCase):
                     8*"The quick brown fox jumps over the lazy dog"]
         for i in range(0, len(msgs)):
             with self.subTest(i=i):
-                print("Signing message "+str(i)+" : "+msgs[i] + "...")
+                print("Signing message "+str(i)+" with 2FA code: "+msgs[i] + "...")
                 msg=msgs[i]
-                #todo: compute hmac
-                paddedmsghash = sha256( msg_magic(msg.encode('utf-8')) ).hexdigest()
-                challenge= paddedmsghash + 32*"BB"
+                # compute hmac: since message signing now goes through the
+                # SignTransactionHash command (ins 0x7A), the 2FA challenge is the
+                # hmac-sha1 of [sha256d(msg_magic(msg)) | 32-byte 0xCC-padding]
+                msghash = sha256d( msg_magic(msg.encode('utf-8')) ).hex()
+                challenge= msghash + 32*"CC"
                 mac = hmac.new(secret_2FA, bytes.fromhex(challenge), sha1).digest()
                 
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=mac, altcoin=None)
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9000) )
                 
                 # with wrong hmac it should not work
+                print("2FA - Signing message " + str(i) + " with wrong 2FA code: " + msgs[i] + "...")
                 (response, sw1, sw2, compsig) = SatochipTest.cc.card_sign_message(keynbr, childkey, msg, hmac=bytes(20), altcoin=None)
                 self.assertEqual(compsig, b'')
                 self.assertEqual( hex(256*sw1+sw2), hex(0x9C0B) )

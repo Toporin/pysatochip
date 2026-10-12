@@ -587,9 +587,9 @@ def common_import_perso_certificate(cert, cert_file):
 @main.command()
 def common_export_perso_certificate():
     """Export the personalisation certificate that is on the device"""
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
+    # if cc.card_get_status()[3]['setup_done'] == False:
+    #     print("Unable to perform this function until setup is complete")
+    #     return
     try:
         # PIN required except for satodime
         if cc.card_type != "Satodime":
@@ -632,9 +632,9 @@ def common_import_ndef_authentikey(privkey):
 @main.command()
 @click.option("--backend", type=click.Choice(["auto", "openssl", "pycryptodomex"]), default="auto", help="Certificate validation backend")
 def common_verify_authenticity(backend):
-    if cc.card_get_status()[3]['setup_done'] == False:
-        print("Unable to perform this function until setup is complete")
-        return
+    # if cc.card_get_status()[3]['setup_done'] == False:
+    #     print("Unable to perform this function until setup is complete")
+    #     return
 
     """Verify the authenticy of the currently connected card"""
     try:
@@ -1104,6 +1104,9 @@ def satochip_sign_schnorr_hash(hash: str, keyslot, path):
             print(f"pubkey for slot {keyslot}: {pubkey.get_public_key_bytes(compressed=False).hex()}")
 
         # tweak key
+        # tweak=None means 'no script tree': the BIP341 tagged hash is computed
+        # over x(P) alone, which is the standard key-path-only (BIP86) output
+        # key. Do NOT pass 32 zero bytes here, that is a different tweak.
         tweak = None
         (response, sw1, sw2) = cc.card_taproot_tweak_privkey(keyslot, tweak, bypass_flag=False)
         print(f"pubkey after tweak: {bytes(response).hex()}")
@@ -1447,10 +1450,10 @@ def common_reset_factory():
         version = d["protocol_version"]
         if (version >= 2):
             print("This SeedKeeper supports factory reset (new version)!")
-            common_reset_factory_new()
+            common_reset_factory_v2()
         else: 
             print("This SeedKeeper supports factory reset (legacy)!")
-            common_reset_factory_legacy()
+            common_reset_factory_v1()
     
     elif cc.card_type == "Satodime":
         print("Satodime does not support factory reset!")
@@ -1463,17 +1466,21 @@ def common_reset_factory():
                     + (d["protocol_minor_version"]<<16)
                     + (d["applet_major_version"]<<8)
                     + (d["applet_minor_version"]))
-        version_min = (12<<16)+4 # v0.12-0.4
-        if (version >= version_min):
-            print("This Satochip supports factory reset (legacy)!")
-            common_reset_factory_legacy() 
+        version_for_v1 = (12<<16)+4 # v0.12-0.4
+        version_for_v3 = (16<<16) # v0.16-0.0
+        if (version >= version_for_v1 and version < version_for_v3):
+            print("This Satochip supports factory reset v1!")
+            common_reset_factory_v1()
+        if (version >= version_for_v3):
+            print("This Satochip supports factory reset v3!")
+            common_reset_factory_v3()
         else:
             print("Satochip below version v0.12-0.4 do not support factory reset!")
             return
 
     elif cc.card_type == "Satocash":
         # satocash only supports factory reset v2
-        common_reset_factory_new()
+        common_reset_factory_v2()
 
     else:
         print(f"Unsupported card type: {cc.card_type}")
@@ -1482,9 +1489,10 @@ def common_reset_factory():
     return
 
 
-def common_reset_factory_legacy():
+def common_reset_factory_v1():
     """Initiate the Factory Reset Process
-    Legacy approach based on sending a specifi APDU a certain number of time
+    Legacy approach based on sending a specific APDU a certain number of time to the card.
+    Supported on Satochip with version >=0.12-0.4 and <0.16-0.0.
     """    
     print("WARNING: FACTORY RESET WITHOUT A WORKING BACKUP WILL LEAD TO UNRECOVERABLE LOSS OF FUNDS")
     logger.info("In common_reset_factory_legacy")
@@ -1522,7 +1530,7 @@ def common_reset_factory_legacy():
                 break
     return
 
-def common_reset_factory_new():
+def common_reset_factory_v2():
     """Initiate the Factory Reset Process
     New approach where reset to factory is trigerred when PIN and PUK is blocked (the card is basically unusable in this state)
     """ 
@@ -1606,6 +1614,24 @@ def common_reset_factory_new():
             print(f"WARNING: remaining PIN tries: {pinRemaining}")
         if pukRemaining != -1:
             print(f"WARNING: remaining PIN tries: {pinRemaining}")
+
+    return
+
+def common_reset_factory_v3():
+    """Initiate the Factory Reset Process
+    Based on sending one specific APDU once to the card.
+    Supported by Satochip with version >=0.16-0.0.
+    """
+    print("WARNING: FACTORY RESET WITHOUT A WORKING BACKUP WILL LEAD TO UNRECOVERABLE LOSS OF FUNDS")
+    logger.info("In common_reset_factory_v3")
+    if click.confirm("Are you sure that you want to perform a factory reset?", default=False):
+        try:
+            (response, sw1, sw2) = cc.card_reset_factory_v3()
+        except Exception as ex:
+            print(f"Factory Reset Failed: {ex}")
+            exit(ex)
+    else:
+        print("The factory reset has been cancelled")
 
     return
 

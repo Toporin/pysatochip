@@ -109,6 +109,7 @@ python tests/test_ec_backend.py TestECDH.test_shared_secret_matches_frozen_vecto
 | `test_secure_channel.py` | The ECDH handshake and AES layer, against a simulated applet |
 | `test_certificate_validator.py` | Both legs of the certificate chain, including the shipped CA certificates |
 | `test_backend_scenarios.py` | Whole-environment checks with dependencies deliberately made unimportable |
+| `test_bip340.py` | BIP340 schnorr signing and verification, and the BIP341 taproot tweak, against the official vectors |
 
 ### Backend coverage
 
@@ -140,17 +141,57 @@ release instead:
 git checkout v0.17.4 && pip install ecdsa && python tests/_gen_vectors.py
 ```
 
+### BIP340 / BIP341 vectors
+
+`tests/vectors_bip340.py` holds the official taproot vectors, transcribed verbatim from upstream:
+`bip-0340/test-vectors.csv`, `bip-0341/wallet-test-vectors.json` and the BIP86 test vectors. They pin
+`tests/bip340_ref.py`, a pure-python BIP340/BIP341 reference built on `ec_math.py` alone, so it needs no
+dependency beyond the library itself (`cryptography` does not expose schnorr or x-only operations).
+
+`tests/test_bip340.py` checks that reference in both directions: it reproduces the 8 published signatures
+byte for byte and rejects the 10 malformed inputs, matches all 7 BIP341 tweak vectors and the 3 BIP86 key
+pairs. It also pins the two facts the applet's taproot code depends on, and which are easy to get subtly
+wrong: an empty merkle root and 32 zero bytes are *different* tweaks (only the former is BIP86), and the
+pre-0.16 applet's XOR tweak agrees with BIP341 exactly when the merkle root is all-zero.
+
+That reference is what the on-card taproot tests compare the card against, so run this suite first: if it
+fails, the hardware results below mean nothing.
+
 ### Hardware tests
 
-The tests in the repository root are separate and need a card in a reader, ideally a non-initialized one.
-They are not part of `run_all.py`:
+The tests in the repository root are separate, need a card in a reader (ideally a non-initialized one) and
+are not part of `run_all.py`:
+
+| File | Covers |
+|---|---|
+| `test_satochip.py` | BIP32 key derivation against the BIP32 test vectors, message signing, 2FA |
+| `test_satochip_taproot.py` | The applet's `TaprootTweakPrivateKey()` and `SignSchnorrHash()` |
+| `test_satochip_musig2.py` | The applet's `Musig2GenerateNonce()` and `Musig2SignHash()`, against the BIP327 test vectors |
+| `test_seedkeeper.py` | The SeedKeeper applet |
 
 ```
-python test_satochip.py
-python test_seedkeeper.py
+python -m unittest -v test_satochip.py
+python -m unittest -v test_satochip_taproot.py
+python -m unittest -v test_seedkeeper.py
 ```
 
-`test_satochip_musig2.py` additionally requires a debug build of the applet.
+**Warning:** these are destructive. They import and reset the BIP32 seed, import and reset private keys in
+the key slots, and expect the PIN to be `123456`. Only run them against a development card, never against
+a card holding funds.
+
+`test_satochip_musig2.py` additionally requires a debug build of the applet (branch `musig2-debug-test`),
+which hardcodes the randomness of the BIP327 vectors and disables secnonce encryption. That build is for
+testing only and must never be used in production.
+
+`test_satochip_taproot.py` needs no debug build. `SignSchnorrHash()` draws its BIP340 `aux_rand` on-card,
+so its signatures are not reproducible and cannot be compared to a vector byte for byte — but they do not
+need to be, since a schnorr signature is checked by *verifying* it against the public key. The BIP341
+tweak, which is deterministic, is compared value by value. The suite covers both tweak forms (a 32-byte
+merkle root and `tweak_size=0`), the keyslot and BIP32 key sources, BIP86 derivation end to end from the
+seed, the bypass (Nostr) path, the authentikey signature over the returned pubkey, nonce freshness across
+repeated signatures, that a signature does not verify under the untweaked key, the schnorr feature policy,
+and the input-validation status words. It skips itself cleanly when no reader, no card, or a 2FA-enabled
+card is present.
 
 ## Development version (Windows)
 

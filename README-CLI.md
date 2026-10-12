@@ -31,6 +31,11 @@ python3 setup.py install[CLI]
 
 ## Common operations
 
+* Setup a card with pin
+```commandline
+python3 satochip_cli.py common-initial-setup
+```
+
 * Verify a card authenticity using default backend:
 ```commandline
 python3 satochip_cli.py common-verify-authenticity
@@ -41,7 +46,21 @@ python3 satochip_cli.py common-verify-authenticity
 python3 satochip_cli.py common-verify-authenticity --backend pycryptodomex
 ```
 
-## Sign Nostr event
+* Reset a card to factory:
+```commandline
+python3 satochip_cli.py common-reset-factory
+```
+
+
+## Satochip operations 
+
+* Import a random seed
+```commandline
+python3 satochip_cli.py satochip-import-unencrypted-mnemonic
+```
+
+
+### Sign Nostr event
 
 _Note: to use this functionality you will need a card with the Satochip applet [v0.14-0.2](https://github.com/Toporin/SatochipApplet/releases/tag/v0.14-0.2) or higher._
 

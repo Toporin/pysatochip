@@ -5,6 +5,162 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.4]:
+
+Fix: restore the derived keys when the card has lost them (applet v0.16-0.0)
+
+Since applet v0.16-0.0, the BIP32 extended key (keynbr 0xFF) and the taproot tweaked key are
+transient: the card clears them on deselect and card reset, for instance when another
+application selects another applet through the same reader. `card_transmit()` already hides
+such a reset: it opens a new secure channel (0x9C21) and verifies the cached PIN (0x9C06),
+then resends the command. With older applets, which kept the keys in flash, the command then
+succeeded with the key derived in the previous session; with v0.16-0.0 it fails with
+SW_INCORRECT_INITIALIZATION (0x9C13).
+
+`card_sign_transaction_hash()` (hence `card_sign_message()` and `card_sign_transaction()`)
+and `card_taproot_tweak_privkey()` with keynbr 0xFF, and `card_sign_schnorr_hash()`, now
+replay the last derivation (and the last tweak for schnorr) made through the CardConnector
+when the card returns 0x9C13, then resend the command once. The replay is only accepted if
+the card returns the same public key (and chaincode) as the first time: a key is never
+restored on another card or from another seed. Otherwise, the 0x9C13 status is returned to
+the caller as before, with a log message: the key must be derived again in the same card
+session. Both keys are restored together, so the BIP32 key derived last is still the one used
+with keynbr 0xFF after a schnorr signature.
+
+Clients that derive the key just before signing (Electrum-Satochip, satochip-cli) are not
+otherwise affected. MuSig2 is not covered: the card keeps the encrypted secnonce sent by
+`card_musig2_sign_hash()` in a buffer cleared on deselect too, so the whole signature must be
+restarted after a reset. Offline tests: `tests/test_derived_key_recovery.py`.
+
+## [0.18.3]:
+
+Change: message and transaction signing now use SignTransactionHash (ins 0x7A)
+
+Applet v0.16-0.0 removes the ParseTransaction (0x71), SignTransaction (0x6F) and SignMessage
+(0x6E) commands -- they now return SW_INS_DEPRECATED (0x9C26). The hashing these commands
+performed on-card is now done client-side, and the resulting hash is signed with the
+SignTransactionHash command (0x7A). Since 0x7A has existed since applet v0.10 and the card
+used to sign sha256(preimage) -- exactly the double hash now sent to it -- the signatures
+are the same and behavior is identical on older applets:
+
+* `card_sign_message()` computes `sha256d(msg_magic(message, altcoin))` itself and signs it
+  with a single APDU instead of the chunked INIT/PROCESS/FINALIZE flow; the compact
+  signature recovery is unchanged.
+* `card_parse_transaction()` no longer exchanges APDUs: it hashes the (prepared) transaction
+  locally with `TxParser` -- the same double-sha256 of the sighash preimage (legacy, or
+  BIP143 for segwit) that the card used to compute -- and returns it with `needs_2fa` (now
+  simply whether 2FA is enabled). The return-tuple contract is unchanged, so callers such as
+  Electrum need no modification. Note that the card can no longer attest the hash with its
+  authentikey: the client is solely responsible for building the correct preimage.
+* `card_sign_transaction()` delegates to `card_sign_transaction_hash()`.
+
+Two 2FA challenge formats change as a consequence (the library only relays the hmac; the 2FA
+app/server must be updated):
+
+* message signing: hmac-sha1 of `[sha256d(msg_magic) | 32-byte 0xCC-padding]` (was a single
+  sha256 with 0xBB-padding);
+* transaction signing: hmac-sha1 of `[txhash | 32-byte 0xCC-padding]` (was 0x00-padding).
+
+Also, the 2FA amount-limit exemption disappears: SignTransactionHash always requires the hmac
+when 2FA is enabled (the on-card amount accounting was removed with ParseTransaction).
+The 2FA test in `test_satochip.py` builds the new message-signing challenge accordingly, and
+the deprecated INS constants are kept, marked as such, in `JCconstants.py`.
+
+Change: `card_unblock_PIN()` supports the new UnblockPIN format of Satochip applet v0.16-0.0
+
+Satochip applet v0.16-0.0 changed the UnblockPIN command (0x46) in a backward-incompatible
+way: the PUK is now prefixed with its size and a new PIN can optionally be set in the same
+command (`data = [PUK_size(1b) | PUK | (optional) PIN_size(1b) | (optional) PIN]`, previously
+just `[PUK]`). `card_unblock_PIN()` picks the format based on the card type and the cached
+protocol version -- calling `card_get_status()` first when the version is not cached yet.
+The new format is only used for Satochip v0.16-0.0 and above; older Satochip versions and
+the SeedKeeper, Satodime and Satocash applets keep the legacy format. The optional new PIN
+is exposed through a new `new_pin` parameter (rejected with ValueError on cards that do not
+support it).
+
+Feat: `card_reset_factory_v3()` resets a Satochip v0.16-0.0+ card to factory with a single APDU
+
+The applet replaced the legacy reset-to-factory procedure (power-cycling the card a fixed
+number of times with a specific APDU in between) with a single command (ins 0xFD, p1 0xAA,
+p2 0x55) that also restores the PIN/PUK try counters, so the card can be set up again
+afterwards. The new `card_reset_factory_v3()` sends it, and the CLI's `common-reset-factory`
+uses it for Satochip v0.16-0.0 and above (the older Satochip procedure and the
+SeedKeeper/Satocash one were renamed v1/v2 for clarity).
+
+Misc:
+
+* CLI: `common-verify-authenticity` and `common-export-perso-certificate` no longer abort
+  when setup is not done: Satochip v0.16+ does not require the PIN to check authenticity or
+  export the personalization certificate.
+* README now documents the schnorr/taproot test suites (offline `tests/test_bip340.py` and
+  the four hardware suites, including the destructive-operation warnings).
+* Added `AGENTS.md`, guidance for AI coding agents working on this repository.
+
+## [0.18.2]:
+
+Fix: `card_taproot_tweak_privkey()` could not request a key-path-only (BIP86) tweak
+
+BIP341 computes the taproot tweak as `t = tagged_hash("TapTweak", x(P) || h)`, over the **concatenation** of
+the internal key and the merkle root `h`. When the output commits to no script tree -- key-path-only
+spending, as in BIP86 -- `h` is the *empty* byte string and only 32 bytes are hashed. Applet v0.16-0.0
+expresses that as `tweak_size = 0`.
+
+`card_taproot_tweak_privkey()` padded a missing tweak to 32 zero bytes and rejected anything that was not
+exactly 32 bytes long, so it could not send `tweak_size = 0`. Hashing `x(P) || 32 zero bytes` is a different
+tweak: it yields a valid-looking key that is not the BIP86 output key, whose address no standard wallet
+watches and whose coins no standard signer can spend. `satochip_cli.py satochip-sign-schnorr-hash`, which
+passes `tweak=None`, was therefore signing under a non-BIP341 key on a v0.16 card.
+
+`tweak` now accepts `None`/empty for "no script tree" (and is optional, defaulting to `None`), keeps
+accepting 32 bytes for a merkle root, and rejects any other length. Note that `tweak=None` and
+`tweak=32*[0]` are two different tweaks; only the former is BIP86.
+
+This only affects applet v0.16-0.0 and later. Earlier versions computed a non-BIP341 tweak from the XOR of
+`x(P)` and `h`, which coincides with the BIP86 tweak exactly when `h` is all-zero -- so the keys derived by
+the old client on an old applet are the same ones the new client derives on a new applet, and remain
+spendable.
+
+Also adds a test suite for the schnorr/taproot support, in two layers:
+* `tests/test_bip340.py` (offline): pins `tests/bip340_ref.py`, a pure-python BIP340/BIP341 reference built
+  on `ec_math.py`, to the official BIP340, BIP341 and BIP86 vectors (`tests/vectors_bip340.py`).
+* `test_satochip_taproot.py` (needs a card): compares the applet's `TaprootTweakPrivateKey()` and
+  `SignSchnorrHash()` to that reference, covering both tweak shapes, the bypass (Nostr) path, the BIP86
+  derivation end to end, nonce freshness and the input-validation status words.
+
+## [0.18.1]:
+
+Fix: secure channel initialization race
+
+Setting up a card that was not initialized yet failed with `UninitializedSecureChannelError`, raised from
+`card_encrypt_secure_channel` on the first `card_setup()` call.
+
+The secure channel used to be established by the card insertion observer, which runs in the pyscard
+`CardMonitor` thread, while client code ran concurrently after a fixed `time.sleep(1)` that is not long
+enough on a slow reader. `card_initiate_secure_channel()` also assigned `self.sc` *before* the 0x81
+exchange, so for the duration of that round trip `self.sc` was a channel that existed but was not
+initialized -- exactly the state the client thread observed. Clients reaching `card_setup()` first never
+initiated the channel themselves either, while `card_get_status()` had already set `needs_secure_channel`.
+
+The channel is now established lazily, by whichever thread first needs it:
+* `card_encrypt_secure_channel()` calls the new idempotent, thread-safe `card_ensure_secure_channel()`.
+  This is the single point where the channel is actually required, so it also covers
+  `card_verify_PIN_simple()` and `card_verify_PIN_deprecated()`, which transmit directly instead of going
+  through `card_transmit()`.
+* `card_initiate_secure_channel()` builds the channel into a local object and publishes it to `self.sc`
+  only once it is fully usable, under a lock. `self.sc` is therefore always either `None` or a working
+  channel, and two threads can no longer run two 0x81 exchanges against each other. The method stays
+  public and now means "force a fresh channel".
+* The observer no longer initiates the channel.
+* `self.sc` is invalidated in `card_disconnect()` and `card_select()`, since a new card or a re-selected
+  applet resets the card side of the channel.
+
+Callers need no change: the explicit `card_initiate_secure_channel()` calls in `satochip_cli.py` and in the
+test files are now redundant but still correct. The one behaviour change is that a card whose channel
+cannot be established reports the error on the first command that needs encryption, in the caller's thread,
+instead of as a warning logged from the monitor thread at insertion time.
+
+The card wire format is unchanged.
+
 ## [0.18.0]:
 
 Security: remove the `ecdsa` dependency (https://github.com/Toporin/pysatochip/issues/8)
