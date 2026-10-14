@@ -10,7 +10,8 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# NB: no logger.setLevel() here on purpose -- configuring logging is the
+# application's job. Each class applies the caller's `loglevel` in __init__.
 
 class CertificateValidator:
     """Validate device certificate chains using OpenSSL or pure Python."""

@@ -10,7 +10,7 @@ from .JCconstants import *
 from .CardDataParser import CardDataParser
 from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
-from .SecureChannel import SecureChannel
+from .SecureChannel import SecureChannel, SecureChannelError, UninitializedSecureChannelError
 from .util import msg_magic, sha256d, hash_160, EncodeBase58Check, dict_swap_keys_values
 from .certificate_validator import CertificateValidator
 
@@ -28,7 +28,8 @@ from typing import Union, List, Optional
 # import traceback
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# NB: no logger.setLevel() here on purpose -- configuring logging is the
+# application's job. Each class applies the caller's `loglevel` in __init__.
 
 MSG_WARNING= ("Before you request coins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
@@ -79,6 +80,53 @@ XPRV_HEADERS_TESTNET = {
 Bip32Derivation = namedtuple('Bip32Derivation', 'path sid option_flags pubkey chaincode')
 TaprootTweak = namedtuple('TaprootTweak', 'keynbr tweak bypass_flag derivation tweaked_pubkey')
 
+# Instructions whose APDU body carries no secret material, in either direction,
+# and may therefore be rendered in full in debug logs.
+#
+# This list is an allow-list on purpose: everything not named here has its body
+# masked. The previous deny-list approach silently leaked whatever it forgot --
+# it omitted INS_IMPORT_KEY (a raw private key) and the SeedKeeper import/export
+# instructions, and it covered only the command direction, so decrypted
+# responses carrying exported masterseeds were logged verbatim. Deny-by-default
+# means a newly added secret-bearing instruction stays masked until someone
+# deliberately clears it.
+_LOGGABLE_INS = frozenset({
+    0xA4,                                       # ISO SELECT: AID only
+    0xFF,                                       # reader pseudo-APDU
+    JCconstants.INS_GET_STATUS,
+    JCconstants.INS_INIT_SECURE_CHANNEL,        # ephemeral pubkey + signatures
+    JCconstants.INS_PROCESS_SECURE_CHANNEL,     # outer wrapper; body is ciphertext
+    JCconstants.INS_GET_CHALLENGE,
+    JCconstants.INS_CHALLENGE_RESPONSE_PKI,
+    JCconstants.INS_EXPORT_PKI_CERTIFICATE,
+    JCconstants.INS_EXPORT_PKI_PUBKEY,
+    JCconstants.INS_BIP32_GET_AUTHENTIKEY,
+    JCconstants.INS_LOGOUT_ALL,
+    JCconstants.INS_LIST_KEYS,
+    JCconstants.INS_LIST_PINS,
+})
+
+
+def _redact_apdu(apdu):
+    """Hex of a command APDU for logging, with the data field masked unless the
+    instruction is on _LOGGABLE_INS."""
+    apdu = list(apdu)
+    if len(apdu) < 5:
+        return toHexString(apdu)
+    if apdu[1] in _LOGGABLE_INS:
+        return toHexString(apdu)
+    return f"{toHexString(apdu[0:5])}{(len(apdu) - 5) * ' *'}"
+
+
+def _redact_response(response, ins=None):
+    """Hex of a response APDU for logging, masked unless the instruction that
+    produced it is on _LOGGABLE_INS. `ins=None` means "unknown", which masks."""
+    response = list(response)
+    if ins in _LOGGABLE_INS:
+        return toHexString(response)
+    return f"({len(response)} bytes)" + len(response) * ' *'
+
+
 # simple observer that will print on the console the card connection events.
 class LogCardConnectionObserver(CardConnectionObserver):
     def update( self, cardconnection, ccevent ):
@@ -87,18 +135,13 @@ class LogCardConnectionObserver(CardConnectionObserver):
         elif 'disconnect'==ccevent.type:
             logger.info( 'disconnecting from' + repr(cardconnection.getReader()) )
         elif 'command'==ccevent.type:
-            if (ccevent.args[0][1] in (JCconstants.INS_SETUP, JCconstants.INS_SET_2FA_KEY,
-                                        JCconstants.INS_BIP32_IMPORT_SEED, JCconstants.INS_BIP32_RESET_SEED,
-                                        JCconstants.INS_CREATE_PIN, JCconstants.INS_VERIFY_PIN,
-                                        JCconstants.INS_CHANGE_PIN, JCconstants.INS_UNBLOCK_PIN)):
-                logger.debug(f"> {toHexString(ccevent.args[0][0:5])}{(len(ccevent.args[0])-5)*' *'}")
-            else:
-                logger.debug(f"> {toHexString(ccevent.args[0])}")
+            self._last_ins = ccevent.args[0][1] if len(ccevent.args[0]) > 1 else None
+            logger.debug(f"> {_redact_apdu(ccevent.args[0])}")
         elif 'response'==ccevent.type:
             if []==ccevent.args[0]:
                 logger.debug( f'< [] {toHexString(ccevent.args[-2:])}')
             else:
-                logger.debug( f'< {toHexString(ccevent.args[0])} {toHexString(ccevent.args[-2:])}')
+                logger.debug( f'< {_redact_response(ccevent.args[0], getattr(self, "_last_ins", None))} {toHexString(ccevent.args[-2:])}')
 
 # a card observer that detects inserted/removed cards and initiate connection
 class RemovalObserver(CardObserver):
@@ -275,7 +318,7 @@ class CardConnector:
             #decrypt response
             elif (sw1==0x90) and (sw2==0x00):
                 if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
-                    response= self.card_decrypt_secure_channel(response)
+                    response= self.card_decrypt_secure_channel(response, ins)
                 return (response, sw1, sw2)
             else:
                 return (response, sw1, sw2)
@@ -781,7 +824,6 @@ class CardConnector:
 
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG satochip_import_privkey apdu: {apdu}")
 
         # send apdu (contains sensitive data!)
         response, sw1, sw2 = self.card_transmit(apdu)
@@ -1282,7 +1324,6 @@ class CardConnector:
         xprv = bytes.fromhex(xprv_header) + bytes([depth]) + fingerprint + child_number + childchaincode + bytes([0x00]) + childkey.get_private_key_bytes()
         assert(len(xprv)==78)
         xprv= EncodeBase58Check(xprv)
-        logger.info(f"card_bip32_get_xpub(): xprv={str(xprv)}")#debugSatochip
         return xprv
 
     def card_bip32_get_liquid_master_blinding_key(self):
@@ -1675,26 +1716,22 @@ class CardConnector:
         #data = [len(aggpk)] + list(aggpk) + [len(msg)] + list(msg) + [len(extra)] + list(extra)
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         pubnonce = bytes(response)
-        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
-        print(f"DEBUG pubnonce: {pubnonce.hex()}")
+        logger.debug(f"card_musig2_generate_nonce() OP_INIT: sw12={hex(256 * sw1 + sw2)}")
 
         # OP_FINALIZE: recover encrypted_secnonce
         p2 = JCconstants.OP_FINALIZE
         data = []
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         encrypted_secnonce = bytes(response)
-        print(f"DEBUG sw12: {hex(256 * sw1 + sw2)}")
-        print(f"DEBUG encrypted_secnonce: {encrypted_secnonce.hex()}")
+        logger.debug(f"card_musig2_generate_nonce() OP_FINALIZE: sw12={hex(256 * sw1 + sw2)}")
 
         return pubnonce, encrypted_secnonce
 
@@ -1726,11 +1763,10 @@ class CardConnector:
         data = list(secnonce)
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG OP_INIT apdu: {bytes(apdu).hex()}")
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
-        print(f"DEBUG OP_INIT sw12: {hex(256*sw1+sw2)}")
+        logger.debug(f"card_musig2_sign_hash() OP_INIT: sw12={hex(256*sw1+sw2)}")
 
         # OP_FINALIZE: send data for signing
         p2 = JCconstants.OP_FINALIZE
@@ -1751,12 +1787,11 @@ class CardConnector:
 
         lc = len(data)
         apdu = [cla, ins, p1, p2, lc] + data
-        print(f"DEBUG OP_FINALIZE apdu: {bytes(apdu).hex()}")
 
         # send apdu
         response, sw1, sw2 = self.card_transmit(apdu)
         psig = bytes(response)
-        print(f"DEBUG OP_FINALIZE sw12: {hex(256 * sw1 + sw2)}")
+        logger.debug(f"card_musig2_sign_hash() OP_FINALIZE: sw12={hex(256 * sw1 + sw2)}")
 
         return psig
 
@@ -2024,14 +2059,12 @@ class CardConnector:
         elif sw1==0x63 and (sw2 & 0xc0)==0xc0:
             logger.error("In card_verify_PIN_simple wrong PIN!")
             self.set_pin(0, None) #reset cached PIN value
-            logger.debug(f"DEBUG In card_verify_PIN_simple reset cached pin: self.pin: {self.pin}")
             pin_left= (sw2 & ~0xc0)
             raise WrongPinError(f"Wrong PIN! {pin_left} tries remaining!", pin_left)
         # wrong PIN (legacy before v0.11)    
         elif sw1==0x9c and sw2==0x02:
             logger.error("In card_verify_PIN_simple wrong PIN!")
             self.set_pin(0, None) #reset cached PIN value
-            logger.debug(f"DEBUG In card_verify_PIN_simple reset cached pin: self.pin: {self.pin}")
             (response2, sw1b, sw2b, d)=self.card_get_status() # get number of pin tries remaining
             pin_left= d.get("PIN0_remaining_tries",-1)
             raise WrongPinError(f"Wrong PIN! {pin_left} tries remaining!", pin_left)
@@ -2335,15 +2368,10 @@ class CardConnector:
         p1= 0x00 
         p2= 0x00
         
-        # log plaintext apdu
-        if (apdu[1] in (JCconstants.INS_SETUP, JCconstants.INS_SET_2FA_KEY,
-                                JCconstants.INS_BIP32_IMPORT_SEED, JCconstants.INS_BIP32_RESET_SEED,
-                                JCconstants.INS_CREATE_PIN, JCconstants.INS_VERIFY_PIN,
-                                JCconstants.INS_CHANGE_PIN, JCconstants.INS_UNBLOCK_PIN)):
-            logger.debug(f"Plaintext C-APDU: {toHexString(apdu[0:5])}{(len(apdu)-5)*' *'}")
-        else:
-            logger.debug(f"Plaintext C-APDU: {toHexString(apdu)}")
-            
+        # log plaintext apdu (body masked unless the instruction is known to be
+        # free of secret material -- see _LOGGABLE_INS)
+        logger.debug(f"Plaintext C-APDU: {_redact_apdu(apdu)}")
+
         (iv, ciphertext, mac)= self.sc.encrypt_secure_channel(bytes(apdu))
         data= list(iv) + [len(ciphertext)>>8, len(ciphertext)&0xff] + list(ciphertext) + [len(mac)>>8, len(mac)&0xff] + list(mac)
         lc= len(data)
@@ -2352,7 +2380,7 @@ class CardConnector:
         
         return encrypted_apdu
     
-    def card_decrypt_secure_channel(self, response):
+    def card_decrypt_secure_channel(self, response, ins=None):
         logger.debug("In card_decrypt_secure_channel")
         
         if len(response)==0:
@@ -2375,8 +2403,9 @@ class CardConnector:
         
         plaintext= sc.decrypt_secure_channel(iv, ciphertext)
         
-        #log response
-        logger.debug( f'Plaintext R-APDU: {toHexString(plaintext)}')
+        # log response. The decrypted body routinely carries exported masterseeds,
+        # private keys and xprv, so it is masked unless `ins` says otherwise.
+        logger.debug( f'Plaintext R-APDU: {_redact_response(plaintext, ins)}')
         
         return plaintext
         
@@ -3408,7 +3437,6 @@ class CardConnector:
         response, sw1, sw2 = self.card_transmit(apdu)
         if sw1 == 0x90 and sw2 == 0x00:
             # response: [pubkey_compressed(33b) | hash(32b) | p2pk_sig(64b)]
-            print(f"debug sig_response: {bytes(response).hex()}")
             pubkey = bytes(response[0:33])
             hash = bytes(response[33:65])
             sig = bytes(response[65:129])
@@ -4074,10 +4102,6 @@ class InvalidP2PKPathError(ApduError):
 class ReusedP2PKPathError(ApduError):
     def __init__(self, message="Key derivation path for P2PK proof has already been used", ins=0x00):
         super().__init__(message, 0x9c, 0x62, ins)
-
-class SecureChannelError(Exception):
-    """Exception related to the secure channel"""
-    pass
 
 class AuthenticationError(Exception):
     """Raised when the command requires authentication first"""

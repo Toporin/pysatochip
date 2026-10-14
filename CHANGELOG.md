@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.5]:
+
+Security: do not leak secrets through logs or stdout; harden the secure-channel AES
+
+Three paths could expose key material on the host, independently of the card.
+
+`satochip_import_privkey()` ended with a `print()` of the command APDU, which embeds the raw
+32-byte private key; being a `print()` rather than a log call, no log level suppressed it.
+Eleven further `print()` calls in the MuSig2 and Satocash paths dumped nonces, the encrypted
+secnonce and signatures. All twelve are removed, and the status words are logged at DEBUG.
+
+The BIP32 extended *private* key was logged at INFO by `card_bip32_get_xpub()`, and the CLI
+logged the masterseed/mnemonic blob from a SeedKeeper export at INFO. Both are removed.
+
+APDU logging masked the body of a fixed list of instructions and logged everything else in
+full. That list omitted `INS_IMPORT_KEY` and the SeedKeeper import/export instructions,
+existed in two diverged copies, and covered only the command direction, so decrypted responses
+carrying exported masterseeds, Satodime private keys or `xprv` were logged verbatim at DEBUG.
+Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by an allow-list,
+`_LOGGABLE_INS`: the body is rendered only for instructions known to carry no secret, and
+anything else, including an unclassified instruction, shows the 5-byte header with the body
+masked.
+
+The library no longer calls `logger.setLevel()` or `logging.basicConfig()` at import time,
+which overrode the importing application's logging configuration. The per-instance `loglevel`
+constructor argument remains the supported hook.
+
+The secure channel no longer uses `pyaes` by default: its table-driven AES makes memory access
+key-dependent, the same class of side channel that led to the removal of the `ecdsa` package
+in v0.18.0 (CVE-2024-23342), here applied to the session key. The new `aes_backend` module
+selects `cryptography`, then `pycryptodomex` (both already dependencies), keeping `pyaes` as a
+last resort for embedded builds that ship neither. The wire format is unchanged -- AES-128-CBC
+with PKCS#7, same key and IV construction -- and a vector captured from the previous `pyaes`
+output pins it. Unlike `ec_backend` this does not fail closed when only `pyaes` is available,
+since the secure channel is mandatory from applet v0.11; it logs a warning instead.
+
+PKCS#7 unpadding is now validated: `pyaes` only checked that the final byte was at most 16 and
+never compared the padding bytes, so a response ending in `0x00` decoded to an empty plaintext.
+Malformed padding, IV length or ciphertext length now raise `SecureChannelError`, which moves
+to a single definition in `SecureChannel.py` and stays re-exported from `CardConnector`.
+
+`python_requires` moves from 3.6 to 3.9, which the code already required: a PEP 701
+nested-quote f-string in the CLI was a `SyntaxError` below 3.12, breaking the `satochip-cli`
+entry point rather than just that command, and `list[int]` annotations need 3.9. The f-string
+is fixed. The `cryptography` minimum moves to 42.0.0, as it is the default backend for every
+private-key operation and the 3.3.2 floor admitted releases with known CVEs.
+
 ## [0.18.4]:
 
 Fix: restore the derived keys when the card has lost them (applet v0.16-0.0)

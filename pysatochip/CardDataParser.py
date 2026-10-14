@@ -28,7 +28,8 @@ from .JCconstants import *
 from .slip44 import *
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# NB: no logger.setLevel() here on purpose -- configuring logging is the
+# application's job. Each class applies the caller's `loglevel` in __init__.
 
 MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
@@ -166,8 +167,6 @@ class CardDataParser:
         logger.debug("In parse_bip32_get_extendedkey_bip85")
         if self.authentikey is None:
             raise ValueError("Authentikey not set!")
-
-        logger.debug(f"[CardDataParser] parse_bip32_get_extendedkey_bip85: response_hex: {bytes(response).hex()}")
 
         # double signature: first is self-signed, second by authentikey
         # firs self-signed sig: data= coordx
@@ -792,11 +791,6 @@ class CardDataParser:
         digest.update(bytes(entropy_list))
         entropy_hash_bytes=digest.digest()
         if (list(entropy_hash_bytes) != privkey_list):
-            logger.debug(f"####### DEBUG ENTROPY => PRIVKEY #######")
-            logger.debug(f"entropy_list: {bytes(entropy_list).hex()}")
-            logger.debug(f"entropy_hash_bytes: {bytes(entropy_hash_bytes).hex()}")
-            logger.debug(f"privkey_list: {bytes(privkey_list).hex()}")
-            logger.debug(f"####### ######################### #######")
             raise Exception(f"Satodime error: recovered private key for keyslot {key_nbr} does not match entropy!")
         
         return (entropy_list, privkey_list, sig_list)

@@ -53,12 +53,9 @@ def assert_bytes(*args):
     """
     porting helper, assert args type
     """
-    try:
-        for x in args:
-            assert isinstance(x, (bytes, bytearray))
-    except:
-        print('assert bytes failed', list(map(type, args)))
-        raise
+    for x in args:
+        if not isinstance(x, (bytes, bytearray)):
+            raise TypeError('expected bytes, got %s' % type(x).__name__)
 
 def var_int(i):
     # https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer

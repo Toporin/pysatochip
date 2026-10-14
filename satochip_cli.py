@@ -1955,7 +1955,6 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                     
                     offset = 0
                     secret_raw_hex = secret_dict['secret']
-                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
                     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
                     
                     mnemonic_size = secret_raw_bytes[offset]
@@ -2032,7 +2031,6 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                     # this format is backward compatible with Masterseed (BIP39 info appended after Masterseed)
                     # mnemonic in compressed format using entropy (16-32 bytes)
                     secret_raw_hex = secret_dict['secret']
-                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
                     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
                     
                     offset = 0
@@ -2815,7 +2813,7 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_s
             elif info_type == 4: # unit
                 proof_info_str = dic_unit_by_code.get(value, "UNKNOWN")
 
-            print(f"index: {index_start + index} - info: {proof_info_str} - type: {dic_info_by_code.get(info_type, "UNKNOWN")}")
+            print(f"index: {index_start + index} - info: {proof_info_str} - type: {dic_info_by_code.get(info_type, 'UNKNOWN')}")
             # print(f"index: {index_start + index}")
             # print(f"info_raw: {value}")
             # print(f"info_str: {proof_info_str}")
