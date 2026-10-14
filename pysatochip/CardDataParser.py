@@ -423,21 +423,41 @@ class CardDataParser:
         return pk
     
     def get_trusted_pubkey(self, response):
+        ''' Recover the trusted pubkey from the card response, after checking
+        that the card signed it with its authentikey.
+
+        The signature is the only thing binding this key to this card, and the
+        trusted pubkey is what a secure secret import (SeedKeeper -> Satochip)
+        encrypts to. A caller that accepts an unverified key here would happily
+        export a seed to a key chosen by whoever is on the wire. Every failure
+        path therefore raises instead of returning a value.
+        '''
+        if self.authentikey is None:
+            raise ValueError("Authentikey not set!")
+
         pubkey_size= response[0]*256+response[1]
         if (pubkey_size !=65):
             raise RuntimeError(f'Error while recovering trusted pubkey: wrong pubkey size, expected 65 but received {pubkey_size}')
         data= response[0:(2+pubkey_size)]
         sig_size= response[2+pubkey_size]*256 + response[2+pubkey_size+1] 
         sig= response[(2+pubkey_size+2):(2+pubkey_size+2+sig_size)]
-        
+        if sig_size==0:
+            # the card chooses sig_size, so an empty signature must not be a
+            # way to skip verification altogether
+            raise ValueError("Signature missing")
+
         pubkey_hex= bytes(response[2:2+pubkey_size]).hex()
         logger.debug(f"Verifying sig for pubkey {pubkey_hex} using authentikey {self.authentikey.get_public_key_bytes(compressed=False).hex()}")
-        
+
         try:
             self.verify_signature(data, sig, self.authentikey)
         except Exception as ex:
-            logger.error('Exception in get_trusted_pubkey: ' + str(ex))
-            
+            logger.error(f"Invalid signature for trusted pubkey: {ex}")
+            raise ValueError(
+                "Invalid signature for trusted pubkey: it is not signed by the "
+                "authentikey of this card, so it must not be used to import a "
+                "secret!") from ex
+
         return pubkey_hex
     
     def parse_to_compact_sig(self, sigin, recid, compressed):

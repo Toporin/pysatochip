@@ -28,6 +28,23 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+`get_trusted_pubkey()` now fails closed. It verified that the card had signed the trusted
+pubkey with its authentikey, then caught the failure, logged it and returned the key anyway.
+That signature is the only thing binding the key to the card, and the trusted pubkey is what a
+secure SeedKeeper -> Satochip import encrypts a secret to, so anything able to alter the card
+response could substitute its own key and receive the exported seed -- while
+`card_import_trusted_pubkey()` reported success to the user. Two further ways to skip the
+check existed in the same function: a card-chosen `sig_size` of 0 made verification raise
+`IndexError`, caught by the same handler, and an unset authentikey raised `AttributeError`
+from the debug line before any check ran.
+
+A missing authentikey and an empty signature are now rejected up front, matching the
+`raise ValueError("Signature missing")` pattern the other parsers already use, and a failed
+verification is re-raised as a `ValueError` chained to the original cause. Both call sites in
+the CLI already wrap the call, so this surfaces as an error message instead of a bogus pubkey.
+Callers that previously ignored the return value's trustworthiness will now see an exception
+where they used to silently receive an unverified key.
+
 `card_parse_transaction()` is deprecated, and `TxParser` is removed. The function kept a
 whole Bitcoin transaction parser alive to produce a value that never depended on the parse:
 `TxParser` only accumulated the bytes it walked over, so `get_tx_double_hash()` was always the
