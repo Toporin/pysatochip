@@ -2726,8 +2726,18 @@ class CardConnector:
         if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
             logger.debug("Fingerprints match !")
         else:
+            # The fingerprint exists precisely to detect that the card stored
+            # something other than what we sent. For a masterseed that means
+            # funds derived from it would be unrecoverable, so this must not be
+            # a log line the caller can miss. The secret is already on the card
+            # under `id`; report it so the caller can delete it.
             logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
-         
+            raise SeedKeeperError(
+                f"Secret import failed: fingerprint mismatch, the card stored something "
+                f"different from what was sent (expected {fingerprint_from_secret}, "
+                f"card reports {fingerprint_from_seedkeeper}). The secret was saved with "
+                f"id {id} and should not be trusted.")
+
         return id, fingerprint_from_seedkeeper
         
     def seedkeeper_export_secret(self, sid, sid_pubkey= None):
@@ -2842,14 +2852,26 @@ class CardConnector:
         #logger.debug(f"Secret: {secret_dict['secret']}")
         #TODO: parse secret depending to type for all possible cases
         
-        # check fingerprint
+        # check fingerprint. Only possible for a plain export: a secure export
+        # returns the secret encrypted to the destination device, so the host
+        # cannot recompute the digest.
         if not is_secure_export:
             secret_dict['fingerprint_from_secret']= hashlib.sha256(bytes(secret)).hexdigest()[0:8]
             if ( secret_dict['fingerprint_from_secret'] == secret_dict['fingerprint'] ):
                 logger.debug("Fingerprints match !")
             else:
+                # The exported bytes do not match the digest the card stored
+                # alongside them: the secret is corrupt or was tampered with in
+                # transit. Returning it anyway would hand the caller a bad seed
+                # that looks exactly like a good one.
                 logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
-            
+                raise SeedKeeperError(
+                    f"Secret export failed: fingerprint mismatch, the exported secret does "
+                    f"not match the fingerprint stored on the card (expected "
+                    f"{secret_dict['fingerprint']}, computed "
+                    f"{secret_dict['fingerprint_from_secret']}). The secret is corrupt or "
+                    f"was tampered with and must not be used.")
+
         return secret_dict
 
     def seedkeeper_export_secret_to_satochip(self, sid, sid_pubkey):

@@ -25,6 +25,7 @@ signatures with real keys rather than mocking verification.
 import os
 import sys
 import unittest
+import hashlib
 from hashlib import sha256
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -130,8 +131,11 @@ class ExportSecretTestCase(unittest.TestCase):
 
     def build_header(self, with_iv=False):
         """[id(2)|type|origin|rights|nbplain|nbsecure|counter|fp(4)|rfu1|rfu2|label_size|label]"""
+        # the fingerprint must be sha256(secret)[0:8]: seedkeeper_export_secret()
+        # verifies it and raises on a mismatch (see test_seedkeeper_fingerprint)
+        fingerprint = list(hashlib.sha256(bytes(self.SECRET)).digest()[0:4])
         header = ([0x01, 0x02], [0x30], [0x01], [0x01], [0x00], [0x00], [0x00],
-                  [0xaa, 0xbb, 0xcc, 0xdd], [0x00], [0x00], [len(self.LABEL)])
+                  fingerprint, [0x00], [0x00], [len(self.LABEL)])
         out = [b for part in header for b in part] + list(self.LABEL)
         return out + ([0x11] * 16 if with_iv else [])
 

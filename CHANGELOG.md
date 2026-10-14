@@ -28,6 +28,19 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+A SeedKeeper fingerprint mismatch is now an error. The card stores
+`sha256(secret)[0:8]` beside each secret for exactly one purpose: to detect that the bytes on
+the card are not the bytes that were meant to be there. Both `seedkeeper_import_secret()` and
+`seedkeeper_export_secret()` compared it and only wrote `logger.error()` on mismatch, then
+returned normally -- so a masterseed the card had stored incorrectly, or an export corrupted
+or tampered with in transit, reached the caller looking exactly like a good one. For a seed
+that means funds derived from it are unrecoverable.
+
+Both now raise `SeedKeeperError`. The import error names the id the suspect secret was stored
+under, since the import has already happened and the caller needs to be able to delete it. The
+export check remains limited to plain exports: a secure export returns the secret encrypted to
+the destination device, so the host cannot recompute the digest.
+
 SeedKeeper export signatures are no longer skippable by the card. `seedkeeper_export_secret()`
 and `seedkeeper_derive_master_password()` chose whether to verify the response signature based
 on `sign_size`, a length the card chooses. A 20-byte value is legitimate -- but only for a
