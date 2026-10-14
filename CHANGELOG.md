@@ -28,6 +28,26 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Responses are no longer parsed before their status word is checked.
+`card_initiate_secure_channel()` discarded `sw1`/`sw2` and handed the body straight to the
+parser; on an error status that body is an error payload or empty, and on a body shaped like a
+valid answer the session key was derived from it. With a card returning `0x6D00` and a
+self-signed rogue ephemeral key in the body, the pre-0.18.5 code established a fully usable
+secure channel keyed to that rogue key. It now raises `UnexpectedSW12Error` before parsing, and
+`self.sc` stays `None` so no later command can use a half-built channel.
+
+`satodime_get_pubkey()` had the same shape and now returns `(response, sw1, sw2, [], [])`
+without parsing, matching `satodime_seal_key()`, `satodime_unseal_key()` and
+`satodime_get_privkey()` -- it was the only one of the four missing the check. The five-value
+tuple is kept, since the CLI unpacks it directly.
+
+`card_bip32_set_authentikey_pubkey()` never looked at its result at all. That command only
+caches the authentikey coordy on the chip as an optimization, and the authentikey it returns
+was parsed and signature-checked from the caller's response rather than from this command, so a
+failure costs performance rather than correctness -- and older applets may not implement ins
+0x75. It now logs a warning instead of passing the failure over in silence, and deliberately
+does not raise.
+
 A SeedKeeper fingerprint mismatch is now an error. The card stores
 `sha256(secret)[0:8]` beside each secret for exactly one purpose: to detect that the bytes on
 the card are not the bytes that were meant to be there. Both `seedkeeper_import_secret()` and

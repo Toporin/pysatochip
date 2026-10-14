@@ -1192,6 +1192,17 @@ class CardConnector:
             lc= len(data)
             apdu=[cla, ins, p1, p2, lc]+data
             (response, sw1, sw2) = self.card_transmit(apdu)
+            if (sw1!=0x90 or sw2!=0x00):
+                # This command is only an optimization: it caches coordy on the
+                # chip so it does not have to recompute it later. The authentikey
+                # returned below was parsed (signature checked) from the caller's
+                # response, not from this command, so a rejection costs
+                # performance rather than correctness -- and older applets may
+                # not implement ins 0x75 at all. Warn rather than fail the
+                # session, but do not pass it over in silence.
+                logger.warning(
+                    f"Could not cache the authentikey coordy on the card "
+                    f"(error code {hex(256*sw1+sw2)}); continuing without it")
         return authentikey
     
     def card_bip32_get_extendedkey(self, path, sid=None, option_flags=0x40):
@@ -2340,7 +2351,16 @@ class CardConnector:
                 response, sw1, sw2 = self.card_transmit(apdu)
             finally:
                 self._sc_initializing= False
-            
+
+            # On an error status the body is an error payload or empty, and
+            # parse_initiate_secure_channel() would index straight into it --
+            # building the session key from whatever bytes came back.
+            if (sw1!=0x90 or sw2!=0x00):
+                logger.error(f"Error during secure channel initialization (error code {hex(256*sw1+sw2)})")
+                raise UnexpectedSW12Error(
+                    f"Unexpected error during secure channel initialization (error code {hex(256*sw1+sw2)})",
+                    sw1, sw2)
+
             # parse response and extract pubkey...
             peer_pubkey = self.parser.parse_initiate_secure_channel(response)
             peer_pubkey_bytes= peer_pubkey.get_public_key_bytes(compressed=False)
@@ -3913,6 +3933,12 @@ class CardConnector:
     
         apdu=[cla, ins, p1, p2]
         (response, sw1, sw2)= self.card_transmit(apdu)
+        if sw1 != 0x90 or sw2 != 0x00:
+            # never parse an error payload; same shape as satodime_seal_key(),
+            # satodime_unseal_key() and satodime_get_privkey(), which all check
+            # this already
+            logger.debug(f"In satodime_get_pubkey error {hex(sw1 * 256 + sw2)}")
+            return response, sw1, sw2, [], []
 
         if self.parser.authentikey is None: # Need to cache the pubkey if this hasn't been done already
             self.card_export_authentikey()
