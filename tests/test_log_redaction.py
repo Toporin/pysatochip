@@ -116,7 +116,7 @@ class TestNoStdoutWrites(unittest.TestCase):
     """A library must not write to stdout at all: no log level can silence it."""
 
     LIBRARY_MODULES = [
-        'CardConnector.py', 'CardDataParser.py', 'SecureChannel.py', 'TxParser.py',
+        'CardConnector.py', 'CardDataParser.py', 'SecureChannel.py',
         'util.py', 'ecc.py', 'ec_math.py', 'ec_backend.py', 'aes_backend.py',
         'certificate_validator.py', 'Satochip2FA.py', 'electrum_mnemonic.py',
     ]

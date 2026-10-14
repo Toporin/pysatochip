@@ -46,8 +46,9 @@ clients such as Electrum and Electrum forks, plus a bundled command-line tool (`
     pyOpenSSL when available with a pure-python `pycryptodomex` fallback (`backend="auto" |
     "openssl" | "pycryptodomex"`). CA certificates ship in `pysatochip/cert/*.cert`
     (packaged via `package_data`).
-  - `CardDataParser.py`, `TxParser.py` — parsers for APDU responses and Bitcoin
-    transactions (legacy & segwit).
+  - `CardDataParser.py` — parser for APDU responses. (`TxParser.py` was removed in
+    0.18.5: `card_parse_transaction()` is deprecated and now just double-sha256s its
+    input, which is all the parser ever produced.)
   - `Satochip2FA.py` — optional 2-Factor-Authentication (HMAC challenge/response, server list).
   - `SecretDecryption.py` — decryption of encrypted SeedKeeper JSON backups.
   - `electrum_mnemonic.py`, `slip44.py`, `util.py` — Electrum seed mnemonics, SLIP-44 coin

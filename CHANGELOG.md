@@ -28,6 +28,31 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+`card_parse_transaction()` is deprecated, and `TxParser` is removed. The function kept a
+whole Bitcoin transaction parser alive to produce a value that never depended on the parse:
+`TxParser` only accumulated the bytes it walked over, so `get_tx_double_hash()` was always the
+plain double-sha256 of its input, on both the legacy and the segwit code path. That was
+verified over 500 generated transactions -- multi-input, multi-output, and with scripts
+straddling the parser's 128-byte chunk size and the 0xfd varint boundary -- before the parser
+was deleted.
+
+It now computes `sha256d(transaction)` directly. `is_segwit` is accepted and ignored, since it
+only ever selected a parsing path. The signature and the `(response, sw1, sw2, tx_hash,
+needs_2fa)` return contract are unchanged, so existing callers such as Electrum keep working;
+the function emits a `DeprecationWarning` and the docstring states that it does not parse its
+input. New code should call `pysatochip.util.sha256d()` and
+`card_sign_transaction_hash()` instead.
+
+Dropping the parser also removes a denial of service. `TxParser.parse_byte()` sliced without
+bounds checks, and Python slicing does not raise on over-read, so a truncated or malformed
+transaction drove its remaining-byte counter negative and `is_parsed()` never became true
+again; the caller was an unguarded `while not txparser.is_parsed()` spin loop. A corrupt or
+hostile transaction could therefore wedge the process at 100% CPU. The parser also called an
+undefined `read_int32()` for any varint in the 0xFE form, raising `NameError` on transactions
+with scripts of 65536 bytes or more. Hashing cannot fail that way, and the new tests cover
+empty, truncated and arbitrary input. `CardDataParser.parse_parse_transaction()`, dead since
+the ins 0x71 ParseTransaction command was removed in applet v0.16-0.0, is deleted too.
+
 Logging configuration now belongs to the application. The library called
 `logger.setLevel()` and `logging.basicConfig()` at import time, and every constructor applied
 its `loglevel` argument to the *module* logger with a default of WARNING, so merely

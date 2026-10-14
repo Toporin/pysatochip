@@ -440,31 +440,6 @@ class CardDataParser:
             
         return pubkey_hex
     
-    ##############
-    def parse_parse_transaction(self, response):
-        '''Satochip returns: [(hash_size+2)(2b) | tx_hash(32b) | need2fa(2b) | sig_size(2b) | sig(sig_size) | txcontext]'''
-        logger.debug("In parse_to_compact_sig")
-        offset=0
-        data_size= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        txhash_size= data_size-2
-        offset+=2
-        tx_hash= response[offset:(offset+txhash_size)]
-        offset+=txhash_size
-        needs_2fa= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        needs_2fa= False if (needs_2fa==0) else True
-        offset+=2
-        sig_size= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        sig_data= response[0:data_size+2] # txhash_size+hash+needs_2fa
-        offset+=2
-        if sig_size>0 and self.authentikey_coordx:
-            sig= response[offset:(offset+sig_size)]
-            pubkey= self.get_pubkey_from_signature(self.authentikey_coordx, sig_data, sig)
-            if pubkey != self.authentikey:
-                raise Exception("signing key is not authentikey!")
-        #todo: error checking
-
-        return (tx_hash, needs_2fa)
-
     def parse_to_compact_sig(self, sigin, recid, compressed):
         ''' convert a DER encoded signature to compact 65-byte format
             input is bytearray in DER format

@@ -8,8 +8,10 @@ from smartcard.sw.SWExceptions import SWException
 
 from .JCconstants import *
 from .CardDataParser import CardDataParser
-from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
+# SecureChannelError / UninitializedSecureChannelError are defined in SecureChannel.py
+# and re-exported here on purpose: AGENTS.md documents the protocol exceptions as
+# living in CardConnector, and downstream code imports them from here.
 from .SecureChannel import SecureChannel, SecureChannelError, UninitializedSecureChannelError
 from . import set_log_level
 from .util import msg_magic, sha256d, hash_160, EncodeBase58Check, dict_swap_keys_values
@@ -17,6 +19,7 @@ from .certificate_validator import CertificateValidator
 
 import hashlib
 import hmac
+import warnings
 import base64
 import logging
 import threading
@@ -1412,47 +1415,51 @@ class CardConnector:
         return (response, sw1, sw2, compsig)
 
     def card_parse_transaction(self, transaction: bytes, is_segwit=False):
-        ''' Compute the transaction hash (sighash) to be signed by the device
-        
-        The dedicated ParseTransaction command (ins 0x71) is deprecated since
-        applet v0.16-0.0 (it returns 0x9C26): the transaction is now parsed and
-        hashed client-side and no APDU is exchanged with the card. The hash
-        returned here is the same double-sha256 of the sighash preimage that
-        the card used to compute (legacy sighash algorithm, or BIP143 for
-        segwit); it can be signed with card_sign_transaction() /
-        card_sign_transaction_hash().
-        
-        Note: since the card no longer parses the transaction, it cannot attest
-        the hash with its authentikey anymore: the client is solely responsible
-        for building the correct preimage. For legacy transactions, this is the
-        prepared transaction (with the scriptCode of the input to sign in place
-        of its scriptSig, the locktime and the 4-byte sighash type appended);
-        for segwit, the BIP143 preimage.
-        
-        Parameters: 
-        transaction (bytes): the transaction (or BIP143 preimage for segwit) to hash
-        is_segwit (bool)
-        
-        Returns: 
+        ''' DEPRECATED. Compute the double-sha256 of the bytes given as input.
+
+        .. deprecated:: 0.18.5
+            This function does **not** parse the transaction. It only returns
+            sha256(sha256(transaction)), and is kept solely for backward
+            compatibility. Use sha256d() from pysatochip.util, or pass the hash
+            straight to card_sign_transaction_hash().
+
+        The dedicated ParseTransaction command (ins 0x71) was removed in applet
+        v0.16-0.0 (it returns 0x9C26), so no APDU is exchanged with the card.
+        Parsing was dropped as well: the parser only ever accumulated the bytes
+        it walked over, so its result was always the plain double-sha256 of its
+        input, for both the legacy and the segwit code path. `is_segwit` is
+        therefore ignored; it is kept only so existing call sites still work.
+
+        The caller is solely responsible for building the correct preimage, and
+        for checking it: nothing here validates that the input is a well-formed
+        transaction. For legacy transactions the preimage is the prepared
+        transaction (the scriptCode of the input to sign in place of its
+        scriptSig, plus the locktime and the 4-byte sighash type); for segwit it
+        is the BIP143 preimage. Since the card no longer parses the transaction,
+        it cannot attest the hash with its authentikey either.
+
+        Parameters:
+        transaction (bytes): the bytes to hash (a prepared transaction or a
+            BIP143 preimage; not validated)
+        is_segwit (bool): ignored, kept for backward compatibility
+
+        Returns:
         (response, sw1, sw2, tx_hash, needs_2fa)
         response (list): empty, no APDU is sent anymore
         sw1, sw2 (int): always (0x90, 0x00), no APDU is sent anymore
-        tx_hash (list): hash as computed locally (same value as returned by the device previously)
+        tx_hash (list): sha256(sha256(transaction))
         needs_2FA (bool): whether 2FA is enabled (and thus required for signing)
         '''
-        logger.debug("In card_parse_transaction")
+        logger.debug("In card_parse_transaction (deprecated)")
+        warnings.warn(
+            "card_parse_transaction() is deprecated and does not parse the "
+            "transaction: it only returns the double-sha256 of its input. Use "
+            "pysatochip.util.sha256d() instead.",
+            DeprecationWarning, stacklevel=2)
 
-        # parse the transaction locally: TxParser accumulates the single and
-        # double sha256 of the preimage while chunking it
-        txparser= TxParser(transaction)
-        while not txparser.is_parsed():
-            if is_segwit:
-                txparser.parse_segwit_transaction()
-            else:
-                txparser.parse_transaction()
-        tx_hash= list(txparser.get_tx_double_hash())
+        tx_hash= list(sha256d(transaction))
         needs_2fa= bool(self.needs_2FA)
-        
+
         return ([], 0x90, 0x00, tx_hash, needs_2fa)
 
     def card_sign_transaction(self, keynbr, txhash, chalresponse):
