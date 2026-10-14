@@ -28,6 +28,26 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Key material returned by the card is now signature-checked.
+`card_bip32_get_liquid_master_blinding_key()` parsed the signature and then left a
+`# todo verify signature` where the check belonged, returning the SLIP-77 master blinding key
+unverified -- a hostile or swapped card chose the blinding key for every confidential Liquid
+address derived from it. `satocash_get_bip32_extendedkey()` had the same `# todo` and
+additionally rebuilt the compressed pubkey from the card's claimed uncompressed point without
+checking it is on the curve, so only the x coordinate survived and a bad y went unnoticed.
+
+The signed message was taken from the applet sources rather than inferred: both applets sign
+everything written before the signature's own length field. For the blinding key that is
+`[keySize(2b) | blindingKey]`; for the Satocash response the authentikey signature covers the
+counter, the pubkey and the preceding self-signature, the same construction the secure-channel
+handshake already uses. Both commands now reject a missing signature and verify against the
+authentikey, and the Satocash pubkey is validated as an on-curve point before being compressed.
+
+Note that INS 0x6D is not implemented by any released Satocash applet, so
+`satocash_get_bip32_extendedkey()` could not be exercised against hardware; its layout follows
+the convention used everywhere else in both applets and should be confirmed on a card once the
+applet implements the command.
+
 Responses are no longer parsed before their status word is checked.
 `card_initiate_secure_channel()` discarded `sw1`/`sw2` and handed the body straight to the
 parser; on an error status that body is an error payload or empty, and on a body shaped like a

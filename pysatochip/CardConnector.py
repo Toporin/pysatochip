@@ -1359,17 +1359,29 @@ class CardConnector:
         if (sw1 != 0x90 or sw2 != 0x00):
             raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256 * sw1 + sw2)})', sw1, sw2)
 
+        if self.parser.authentikey is None:
+            self.card_bip32_get_authentikey()
+
         offset=0
         keySize= 256 * (response[offset] & 0xff) + response[offset+1]
         offset+=2
         blindingKey= response[2:2+keySize]
         offset += keySize
 
+        # The applet signs everything written before the signature field, i.e.
+        # [keySize(2b) | blindingKey], with the authentikey -- see
+        # getBIP32LiquidMasterBlindingKey() -> appendAuthentikeySignature() in
+        # SatochipApplet. Without this check a hostile or swapped card chooses
+        # the master blinding key for every confidential Liquid address the
+        # wallet derives from it.
+        signed_data= response[0:offset]
         sigSize= 256 * response[offset] + response[offset+1]
         offset+=2
         sig= response[offset:(offset+sigSize)]
         offset += sigSize
-        # todo verify signature
+        if sigSize==0:
+            raise ValueError("Signature missing")
+        self.parser.verify_signature(signed_data, sig, self.parser.authentikey)
 
         return blindingKey
 
@@ -3570,15 +3582,41 @@ class CardConnector:
 
         # parse response
         # response: [ counter(4b) | pubkey(65b) | sig_size(2b) | self-sig | sig_size(2b) | authentikey-sig]
+        if len(response) < 73:
+            raise UnexpectedSW12Error(
+                f"Truncated response in satocash_get_bip32_extendedkey: {len(response)} bytes", sw1, sw2)
         counter = response[0:4]
         pubkey_uncompressed = response[4:69]
+
+        # The authentikey signature covers everything up to its own length
+        # field, i.e. counter, pubkey and the self-signature -- the convention
+        # used by every signed response in both applets (sign over buffer[0..offset)
+        # before appending sign_size||sig). The self-signature proves nothing to
+        # a man in the middle, who can simply sign with their own key; the
+        # authentikey one is what binds this key to this card.
+        msg_size= 69
+        sig_size= (response[msg_size]<<8) + response[msg_size+1]
+        msg2_size= msg_size + 2 + sig_size
+        if sig_size==0:
+            raise ValueError("Signature missing")
+        if len(response) < msg2_size+2:
+            raise UnexpectedSW12Error(
+                f"Truncated response in satocash_get_bip32_extendedkey: {len(response)} bytes", sw1, sw2)
+        sig2_size= (response[msg2_size]<<8) + response[msg2_size+1]
+        if sig2_size==0:
+            raise ValueError("Signature missing")
+        sig2= response[(msg2_size+2):(msg2_size+2+sig2_size)]
+        self.parser.verify_signature(response[0:msg2_size], sig2, self.parser.authentikey)
+
+        # only compress a point that is actually on the curve: the compressed
+        # form keeps just x, so an invalid y would otherwise go unnoticed
+        ECPubkey(bytes(pubkey_uncompressed))
+
         pubkey_compressed = pubkey_uncompressed[0:33]
         if pubkey_uncompressed[64]%2 == 0:
             pubkey_compressed[0] = 0x02
         else:
             pubkey_compressed[0] = 0x03
-
-        # todo: check signatures
 
         return bytes(counter), bytes(pubkey_compressed)
 
