@@ -35,6 +35,8 @@ import certifi
 import ssl
 from xmlrpc.client import ServerProxy
 
+from . import set_log_level
+
 logger = logging.getLogger(__name__)
 #logger.setLevel(logging.DEBUG)
 
@@ -54,8 +56,12 @@ ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile
 #server = ServerProxy('https://cosigner.satochip.io:81', allow_none=True, context=ssl_context) # wrong port to generate timeout error
 
 class Satochip2FA:
-    def __init__(self, loglevel= logging.WARNING):
-        logger.setLevel(loglevel)
+    def __init__(self, loglevel= None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
     
     # send the challenge and get the reply 
     @classmethod

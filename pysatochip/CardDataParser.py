@@ -27,9 +27,12 @@ from .ecc import ECPubkey, ECPrivkey, InvalidECPointException, sig_string_from_d
 from .JCconstants import *
 from .slip44 import *
 
+from . import set_log_level
+
 logger = logging.getLogger(__name__)
-# NB: no logger.setLevel() here on purpose -- configuring logging is the
-# application's job. Each class applies the caller's `loglevel` in __init__.
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
@@ -38,8 +41,12 @@ MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
 
 class CardDataParser:
 
-    def __init__(self, loglevel= logging.WARNING):
-        logger.setLevel(loglevel)
+    def __init__(self, loglevel= None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
         self.authentikey=None
         self.authentikey_coordx= None

@@ -32,8 +32,9 @@ own PADDING_DEFAULT does not.
 import logging
 
 logger = logging.getLogger(__name__)
-# NB: no logger.setLevel() here on purpose -- configuring logging is the
-# application's job.
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 BACKEND_CRYPTOGRAPHY = "cryptography"
 BACKEND_PYCRYPTODOMEX = "pycryptodomex"

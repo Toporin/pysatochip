@@ -165,5 +165,80 @@ class TestNoImportTimeLoggingConfig(unittest.TestCase):
                          "\n".join(offenders))
 
 
+class TestLogLevelConfiguration(unittest.TestCase):
+    """The level belongs to the application, not to the library.
+
+    Before 0.18.5 every constructor called `logger.setLevel(loglevel)` on its
+    *module* logger, with a default of WARNING. Constructing any object
+    therefore silently overrode whatever the host application had configured,
+    and a second instance retroactively changed the first. Levels are now set
+    only when the caller explicitly asks, and on the package logger so they
+    cascade."""
+
+    PKG = 'pysatochip'
+    SUBS = ('pysatochip.CardConnector', 'pysatochip.CardDataParser',
+            'pysatochip.SecureChannel', 'pysatochip.certificate_validator',
+            'pysatochip.ec_backend', 'pysatochip.aes_backend')
+
+    def setUp(self):
+        self._saved = {n: logging.getLogger(n).level
+                       for n in (self.PKG,) + self.SUBS}
+
+    def tearDown(self):
+        for name, level in self._saved.items():
+            logging.getLogger(name).setLevel(level)
+
+    def test_module_loggers_stay_at_notset(self):
+        """A module logger with its own level would block the cascade."""
+        for name in self.SUBS:
+            with self.subTest(logger=name):
+                self.assertEqual(logging.getLogger(name).level, logging.NOTSET)
+
+    def test_set_log_level_cascades_to_every_module(self):
+        import pysatochip
+        for level in (logging.DEBUG, logging.ERROR):
+            pysatochip.set_log_level(level)
+            for name in self.SUBS:
+                with self.subTest(logger=name, level=level):
+                    self.assertEqual(
+                        logging.getLogger(name).getEffectiveLevel(), level)
+
+    def test_default_construction_does_not_touch_the_level(self):
+        """The regression: an application's explicit choice must survive."""
+        import pysatochip
+        from pysatochip.CardDataParser import CardDataParser
+        pysatochip.set_log_level(logging.DEBUG)
+        CardDataParser()
+        self.assertEqual(
+            logging.getLogger('pysatochip.CardDataParser').getEffectiveLevel(),
+            logging.DEBUG)
+
+    def test_second_instance_does_not_clobber_the_first(self):
+        from pysatochip.CardDataParser import CardDataParser
+        CardDataParser(logging.DEBUG)
+        CardDataParser()
+        self.assertEqual(
+            logging.getLogger('pysatochip.CardDataParser').getEffectiveLevel(),
+            logging.DEBUG)
+
+    def test_explicit_loglevel_is_still_honoured(self):
+        """Backward compatibility: the constructor argument still works."""
+        import pysatochip
+        from pysatochip.CardDataParser import CardDataParser
+        pysatochip.set_log_level(logging.WARNING)
+        CardDataParser(logging.DEBUG)
+        self.assertEqual(
+            logging.getLogger('pysatochip.CardDataParser').getEffectiveLevel(),
+            logging.DEBUG)
+
+    def test_package_has_a_null_handler(self):
+        """Without one, library records fall through to logging.lastResort
+        and print to stderr in applications that configure no logging."""
+        import pysatochip  # importing the package is what installs the handler
+        handlers = logging.getLogger(pysatochip.__name__).handlers
+        self.assertTrue(any(isinstance(h, logging.NullHandler) for h in handlers),
+                        "pysatochip package logger needs a NullHandler")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

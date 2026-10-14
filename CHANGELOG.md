@@ -28,9 +28,26 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
-The library no longer calls `logger.setLevel()` or `logging.basicConfig()` at import time,
-which overrode the importing application's logging configuration. The per-instance `loglevel`
-constructor argument remains the supported hook.
+Logging configuration now belongs to the application. The library called
+`logger.setLevel()` and `logging.basicConfig()` at import time, and every constructor applied
+its `loglevel` argument to the *module* logger with a default of WARNING, so merely
+constructing an object overrode whatever the host application had configured, and a second
+instance retroactively changed the first. The level was also relayed by three different
+mechanisms and never reached `certificate_validator`, `ec_backend`, `aes_backend` or
+`TxParser`, so `--verbose` skipped them.
+
+`pysatochip/__init__.py` now installs a `NullHandler` on the package logger and exposes
+`set_log_level(level)`, which sets the level once on the `pysatochip` logger and cascades to
+every submodule; module loggers stay at NOTSET so nothing blocks the cascade. The `loglevel`
+constructor arguments keep their name, position and meaning, but default to `None` (leave the
+application's configuration alone) and, when given, simply call `set_log_level()`.
+
+Two observable changes for existing applications. An application that configures no logging at
+all no longer sees pysatochip warnings on stderr, because the `NullHandler` replaces
+`logging.lastResort`; in practice the library signals failure by raising far more than by
+logging. And an application whose root logger is at DEBUG, but which never passed `loglevel`,
+now gets pysatochip debug output where the library previously forced itself to WARNING;
+`logging.getLogger('pysatochip').setLevel(logging.WARNING)` restores the old volume.
 
 The secure channel no longer uses `pyaes` by default: its table-driven AES makes memory access
 key-dependent, the same class of side channel that led to the removal of the `ecdsa` package

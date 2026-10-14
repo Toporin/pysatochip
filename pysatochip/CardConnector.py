@@ -11,6 +11,7 @@ from .CardDataParser import CardDataParser
 from .TxParser import TxParser
 from .ecc import ECPubkey, ECPrivkey
 from .SecureChannel import SecureChannel, SecureChannelError, UninitializedSecureChannelError
+from . import set_log_level
 from .util import msg_magic, sha256d, hash_160, EncodeBase58Check, dict_swap_keys_values
 from .certificate_validator import CertificateValidator
 
@@ -28,8 +29,9 @@ from typing import Union, List, Optional
 # import traceback
 
 logger = logging.getLogger(__name__)
-# NB: no logger.setLevel() here on purpose -- configuring logging is the
-# application's job. Each class applies the caller's `loglevel` in __init__.
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 MSG_WARNING= ("Before you request coins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
@@ -222,12 +224,15 @@ class CardConnector:
     SATODIME_AID= [0x53, 0x61, 0x74, 0x6f, 0x44, 0x69, 0x6d, 0x65] #SatoDime
     SATOCASH_AID= [0x53, 0x61, 0x74, 0x6f, 0x63, 0x61, 0x73, 0x68] # Satocash
     
-    def __init__(self, client=None, loglevel= logging.WARNING, card_filter=None):
-        logger.setLevel(loglevel)
-        logger.info(f"Logging set to level: {str(loglevel)}")
+    def __init__(self, client=None, loglevel= None, card_filter=None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
         self.logger= logger
-        self.parser=CardDataParser(loglevel)
+        self.parser=CardDataParser()
         self.client=client
         if self.client is not None:
             self.client.cc=self
@@ -2317,7 +2322,7 @@ class CardConnector:
         
         with self._sc_lock:
             # get sc
-            sc= SecureChannel(logger.getEffectiveLevel())
+            sc= SecureChannel()
             pubkey= list(sc.sc_pubkey_serialized)
             lc= len(pubkey) #65
             apdu=[cla, ins, p1, p2, lc] + pubkey

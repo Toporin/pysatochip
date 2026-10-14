@@ -4,16 +4,22 @@ from os import urandom
 from hashlib import sha1
 
 from . import aes_backend
+from . import set_log_level
 from . import ec_backend
 
 logger = logging.getLogger(__name__)
-# NB: no logger.setLevel() here on purpose -- configuring logging is the
-# application's job. Each class applies the caller's `loglevel` in __init__.
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 class SecureChannel:
 
-    def __init__(self, loglevel= logging.WARNING):
-        logger.setLevel(loglevel)
+    def __init__(self, loglevel= None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
         self.initialized_secure_channel= False
         self.sc_privkey= None

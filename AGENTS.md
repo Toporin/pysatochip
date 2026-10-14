@@ -11,8 +11,8 @@ javacard applets (SeedKeeper, Satodime, Satocash). It talks to smartcards over P
 clients such as Electrum and Electrum forks, plus a bundled command-line tool (`satochip-cli`).
 
 - License: LGPL v3 (some files carry Apache-2.0 or MIT-style Electrum headers; keep them intact)
-- Python: >= 3.6 (per `setup.py`); developed and tested on CPython 3.12
-- Package on PyPI: `pysatochip`; current version lives in `pysatochip/version.py` (0.18.4)
+- Python: >= 3.9 (per `setup.py`); developed and tested on CPython 3.12
+- Package on PyPI: `pysatochip`; current version lives in `pysatochip/version.py` (0.18.5)
 - Upstream: https://github.com/Toporin/pysatochip
 
 ## Repository layout
@@ -26,8 +26,13 @@ clients such as Electrum and Electrum forks, plus a bundled command-line tool (`
   - `JCconstants.py` — APDU CLA/INS codes, status words (SW), capability bits. Must stay in
     sync with the applet; values are part of the wire protocol.
   - `SecureChannel.py` — the encrypted channel to the card: ECDH key exchange + key
-    derivation (HMAC-SHA1) + AES (pyaes). The wire format is pinned by regression vectors
-    (see Testing).
+    derivation (HMAC-SHA1) + AES-128-CBC via `aes_backend`. The wire format is pinned by
+    regression vectors (see Testing).
+  - `aes_backend.py` — AES backend selection for the secure channel, mirroring
+    `ec_backend.py`: `cryptography`, then `pycryptodomex`, with pure-python `pyaes` only
+    as a last resort for embedded builds. PKCS#7 padding lives here so every backend
+    behaves identically. Unlike `ec_backend` it does not fail closed, since the secure
+    channel is mandatory from applet v0.11.
   - `ec_backend.py` — side-channel-hardened EC backend. **All** secret-dependent operations
     (ECDH, signing, key derivation) must go through this module. It selects
     `pyca/cryptography` by default, or libsecp256k1 via `embit` when cryptography is absent
@@ -62,8 +67,9 @@ clients such as Electrum and Electrum forks, plus a bundled command-line tool (`
 
 There is no `pyproject.toml`; packaging is setuptools-based:
 
-- `setup.py` + `requirements.txt` + `MANIFEST.in`. Runtime deps: `pyscard`, `pyaes`,
-  `cryptography` (default EC backend), `pyopenssl`, `pycryptodomex`, `certifi`.
+- `setup.py` + `requirements.txt` + `MANIFEST.in`. Runtime deps: `pyscard`,
+  `cryptography` (default EC and AES backend), `pyopenssl`, `pycryptodomex`, `pyaes`
+  (last-resort AES only), `certifi`.
 - Extras: `pip install "pysatochip[CLI]"` (mnemonic, click, websockets, nostr, cbor2) and
   `pip install "pysatochip[embedded]"` (embit/libsecp256k1 fallback backend).
 - Install from source: `pip install .` / `pip install -e ".[CLI]"`, or legacy
@@ -123,8 +129,22 @@ production. These suites are deliberately excluded from `tests/run_all.py`.
 ## Code conventions
 
 - English for all code, comments and docs.
-- Standard library `logging`: each module does `logger = logging.getLogger(__name__)`;
-  classes typically take a `loglevel` constructor argument.
+- Standard library `logging`: each module does `logger = logging.getLogger(__name__)`,
+  giving the hierarchy `pysatochip.<module>`. Module loggers **must stay at NOTSET**
+  — never call `logger.setLevel()` at import time or from a constructor, and never
+  add a handler or call `logging.basicConfig()` outside a `__main__` block. Level and
+  handler policy belong to the application that imports the library; a module logger
+  with its own level also blocks the cascade described next.
+  `pysatochip/__init__.py` installs a `NullHandler` on the package logger and exposes
+  `set_log_level(level)`, which sets the level once on `pysatochip` and therefore
+  cascades to every submodule. Classes still accept a `loglevel` constructor argument
+  for backward compatibility, but it defaults to `None` (do nothing) and, when given,
+  is just a call to `set_log_level()` — it is package-wide, not per-instance.
+- Never log secret material. APDU logging goes through `_redact_apdu()` /
+  `_redact_response()` in `CardConnector.py`, which mask the body unless the
+  instruction is on the `_LOGGABLE_INS` allow-list. The list is deny-by-default on
+  purpose: a new secret-bearing instruction stays masked until someone clears it.
+  Library modules must not `print()` at all. See CHANGELOG 0.18.5.
 - APDU-level methods in `CardConnector` follow the `<applet>_<action>` naming pattern and
   return parsed values or raise the dedicated exceptions defined at the top of
   `CardConnector.py`; card status words are checked against `JCconstants` rather than magic
