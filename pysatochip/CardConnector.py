@@ -2586,6 +2586,10 @@ class CardConnector:
         if (is_secure_export):
             raise RuntimeError("is_secure_export currently unsupported for seedkeeper_derive_master_password")
 
+        # the response signature is checked below, which needs the authentikey
+        if self.parser.authentikey is None:
+            self.card_bip32_get_authentikey()
+
         cla= JCconstants.CardEdge_CLA
         ins= 0xAF
         p1= 0x02 if is_secure_export else 0x01
@@ -2620,19 +2624,16 @@ class CardConnector:
             offset+=2
             sign= response[offset:(offset+sign_size)]
 
-            # check signature
-            if (sign_size==20):
-                dic['hmac_list']=sign
-                dic['hmac']=bytes(sign).hex()
-            else:
-                try:
-                    self.parser.verify_signature(full_data, sign, self.parser.authentikey)
-                    dic['sign_list']=sign
-                    dic['sign']=bytes(sign).hex()
-                except Exception as ex:
-                    dic['sign_list']=sign
-                    dic['sign']=bytes(sign).hex()
-                    dic['error_msg']= str(ex)
+            # Check signature. is_secure_export is always False here (the
+            # function raises above when it is requested), so the card must
+            # return a signature over full_data, never the 20-byte hmac of a
+            # secure export. Letting the card-chosen length select the branch
+            # made "return 20 bytes" a way to skip verification entirely, and
+            # swallowing the failure into dic['error_msg'] handed the caller a
+            # normal-looking derived master password with an unchecked signature.
+            self.parser.verify_signature(full_data, sign, self.parser.authentikey)
+            dic['sign_list']=sign
+            dic['sign']=bytes(sign).hex()
         else:
             logger.error(f"Error during master password derivation: {hex(256*sw1+sw2)}")
             dic = {}
@@ -2812,9 +2813,18 @@ class CardConnector:
                 offset+=2
                 sign= response[offset:(offset+sign_size)]
                 
-                # check signature
+                # Check signature. Which form the card returns is decided by the
+                # export mode *we* asked for, not by the length the card sends
+                # back: a plain export is signed with the authentikey, while a
+                # secure export carries a 20-byte hmac keyed with the secret
+                # shared with the destination device, which only that device can
+                # verify. Branching on sign_size let any card skip verification
+                # on a plain export simply by returning 20 bytes.
                 full_data=secret_dict['header_list']+secret
-                if (sign_size==20):
+                if is_secure_export:
+                    if (sign_size!=20):
+                        raise SeedKeeperError(
+                            f"Export failed: expected a 20-byte hmac for a secure export, got {sign_size} bytes")
                     secret_dict['hmac_list']=sign
                     secret_dict['hmac']=bytes(sign).hex()
                 else:

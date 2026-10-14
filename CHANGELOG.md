@@ -28,6 +28,28 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+SeedKeeper export signatures are no longer skippable by the card. `seedkeeper_export_secret()`
+and `seedkeeper_derive_master_password()` chose whether to verify the response signature based
+on `sign_size`, a length the card chooses. A 20-byte value is legitimate -- but only for a
+*secure* export, where it is an hmac keyed with the secret shared with the destination device,
+which only that device can check. For a plain export the card must sign with its authentikey,
+so a card that simply returned 20 bytes bypassed verification and the host stored the result as
+a trusted secret. The branch now follows `is_secure_export`, which the host decides: a plain
+export must carry a verifiable authentikey signature, and a secure export must carry exactly 20
+bytes, any other length raising `SeedKeeperError`.
+
+`seedkeeper_derive_master_password()` additionally caught a failed verification, put the
+message in `dic['error_msg']` and returned the derived master password anyway, so a caller that
+did not inspect that extra key accepted an unverified result. It now always verifies -- secure
+export is unsupported there, so the hmac branch was unreachable in a legitimate flow -- and
+lets the failure propagate. Because the failure had always been swallowed, it had also gone
+unnoticed that the function never initialised the authentikey it verifies against; it now does,
+like `seedkeeper_export_secret()`.
+
+Callers that relied on `dic['error_msg']` to detect a bad signature should catch the exception
+instead. Genuine signatures, and genuine 20-byte hmacs on secure exports, behave exactly as
+before.
+
 `get_trusted_pubkey()` now fails closed. It verified that the card had signed the trusted
 pubkey with its authentikey, then caught the failure, logged it and returned the key anyway.
 That signature is the only thing binding the key to the card, and the trusted pubkey is what a

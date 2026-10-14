@@ -18,9 +18,9 @@ import io
 import logging
 import os
 import re
+import subprocess
 import sys
 import unittest
-from contextlib import redirect_stdout
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), os.pardir))
@@ -137,13 +137,23 @@ class TestNoStdoutWrites(unittest.TestCase):
                          "\n".join(offenders))
 
     def test_importing_pysatochip_is_silent(self):
-        """Importing the package must not emit anything on stdout."""
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            import importlib
-            import pysatochip.CardConnector
-            importlib.reload(pysatochip.CardConnector)
-        self.assertEqual(buf.getvalue(), "")
+        """A fresh import of the package must not emit anything on stdout.
+
+        Done in a subprocess, like tests/test_backend_scenarios.py: an
+        importlib.reload() in-process would rebuild every class in the module,
+        so exceptions raised afterwards would no longer be the ones other test
+        modules imported, and assertRaises() would stop matching them.
+        """
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, %r)\n"
+             "import pysatochip.CardConnector, pysatochip.CardDataParser\n"
+             "import pysatochip.SecureChannel, pysatochip.certificate_validator\n"
+             % root],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "")
 
 
 class TestNoImportTimeLoggingConfig(unittest.TestCase):
