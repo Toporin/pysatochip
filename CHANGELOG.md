@@ -28,6 +28,21 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Two Satocash CLI bugs made it report, and act on, wrong proof data. Both were silent: the
+output looked plausible either way.
+
+`keyset_indexes_by_mint = max_nb_mints * [set()]` put the *same* set object at every index, so
+adding a keyset to one mint added it to all of them. That list is handed to
+`satocash_export_keysets()`, so `satocash-export-tokenv4` selected proofs belonging to other
+mints. The neighbouring `max_nb_mints * [0]` lines are fine only because integers are immutable
+and `+=` rebinds rather than mutates, which is what makes the bug easy to miss. Both set lists
+are now built with a comprehension.
+
+`satocash-get-proof-info` decoded the proof state with `value ^ 0x03` while the comment on the
+same line said "MASK 0x03". XOR reported unspent proofs as spent and spent ones as unspent, and
+turned every P2PK-flagged proof and every empty slot into "UNKNOWN". It now masks, as the
+adjacent `value & 0x80` check already did.
+
 Three CLI commands were invoking other commands as if they were plain functions.
 `@main.command()` binds the name to a `click.Command`, so calling it runs Click's standalone
 `main()`: it re-parses `sys.argv`, re-prompts for the PIN and then exits the process.

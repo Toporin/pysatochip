@@ -2817,7 +2817,9 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_s
         for index, value in enumerate(response):
             proof_info_str = value
             if info_type == 0: # state
-                proof_info_str = dic_state_by_code.get((value ^ 0x03), "UNKNOWN") # MASK 0x03 to extract spent state.
+                # mask, as the comment always said: XOR mapped unspent<->spent,
+                # and turned every P2PK-flagged or empty slot into "UNKNOWN"
+                proof_info_str = dic_state_by_code.get((value & 0x03), "UNKNOWN")
                 if value & 0x80 == 0x80:
                     # P2PK flag
                     proof_info_str += " P2PK"
@@ -3069,8 +3071,12 @@ def satocash_export_tokenv4(unit: str, amount: int):
         # compute balance for each mint
         # also list keysets by mint and proofs by keyset
         amount_unspent_by_mints = max_nb_mints * [0]
-        keyset_indexes_by_mint = max_nb_mints * [set()]
-        proof_indexes_by_keyset = max_nb_keysets * [set()]
+        # `n * [set()]` would put the *same* set object at every index, so
+        # .add() below would record every keyset against every mint. The
+        # neighbouring `n * [0]` lines are fine only because ints are immutable
+        # and `+=` rebinds instead of mutating.
+        keyset_indexes_by_mint = [set() for _ in range(max_nb_mints)]
+        proof_indexes_by_keyset = [set() for _ in range(max_nb_keysets)]
         amount_available = 0
         mint_index = None
         for proof_index in range(max_nb_proofs):
