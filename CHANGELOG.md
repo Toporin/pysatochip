@@ -28,6 +28,11 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+`base_encode(v, base=43)` referenced an undefined `__b43chars`, so base 43 -- which the
+function's own guard advertises as supported -- raised `NameError` unconditionally. The
+alphabet is now defined, with the same ordering as in Electrum, which this helper was ported
+from.
+
 Three remaining correctness bugs.
 
 `card_bip32_get_xpub()` and `card_bip32_get_xprv()` document `path` as `str | bytes`, but only

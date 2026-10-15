@@ -156,5 +156,39 @@ class TestCompactSigIndexing(unittest.TestCase):
                 self.assertEqual(set(out[1:33 - lr]), {0} if lr < 32 else set())
 
 
+class TestBase43Encoding(unittest.TestCase):
+    """base_encode(..., base=43) referenced an undefined __b43chars, so the
+    base 43 its own guard advertises raised NameError unconditionally."""
+
+    ALPHABET = b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$*+-./:'
+
+    def test_base43_does_not_raise(self):
+        from pysatochip.util import base_encode
+        self.assertIsInstance(base_encode(b'\x01\x02\x03', base=43), str)
+
+    def test_base43_round_trips(self):
+        from pysatochip.util import base_encode
+        for payload in (b'\x01', b'\x01\x02\x03', b'hello world', bytes(range(32))):
+            with self.subTest(payload=payload[:8]):
+                n = 0
+                for ch in base_encode(payload, base=43).encode():
+                    n = n * 43 + self.ALPHABET.index(ch)
+                self.assertEqual(n, int.from_bytes(payload, 'big'))
+
+    def test_leading_zero_bytes_become_leading_alphabet_zero(self):
+        from pysatochip.util import base_encode
+        self.assertTrue(base_encode(b'\x00\x00\x01', base=43).startswith('00'))
+
+    def test_base58_is_unaffected(self):
+        from pysatochip.util import base_encode, EncodeBase58Check
+        self.assertEqual(base_encode(b'\x00\x01\x02hello', base=58), '13DgQxdPmp')
+        self.assertIsInstance(EncodeBase58Check(b'\x01\x02'), str)
+
+    def test_unsupported_base_still_rejected(self):
+        from pysatochip.util import base_encode
+        with self.assertRaises(ValueError):
+            base_encode(b'x', base=16)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

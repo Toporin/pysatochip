@@ -88,6 +88,12 @@ def msg_magic(message: bytes, altcoin=None) -> bytes:
         return message_full
 
 __b58chars = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+assert len(__b58chars) == 58
+# base_encode(..., base=43) referenced this without it ever being defined,
+# so the base 43 the guard below advertises raised NameError. Alphabet and
+# ordering as in Electrum, which is what this helper was ported from.
+__b43chars = b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$*+-./:'
+assert len(__b43chars) == 43
 
 def EncodeBase58Check(vchIn: bytes) -> str:
     hash = sha256d(vchIn)
