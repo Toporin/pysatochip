@@ -1,0 +1,9 @@
+# Commits that only reformatted code, with no content change. Skip them in
+# blame so they do not mask the real author of each line.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub applies this file automatically in its blame view.
+
+# normalise all text files to LF (whitespace only, verified byte-for-byte)
+6d4ceb95618bc88906ae6ec5ee4de03d7087a3c8

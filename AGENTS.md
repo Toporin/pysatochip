@@ -130,6 +130,11 @@ production. These suites are deliberately excluded from `tests/run_all.py`.
 ## Code conventions
 
 - English for all code, comments and docs.
+- Text files are stored with LF endings, enforced repo-wide by `.gitattributes`
+  (`* text=auto`). Do not hand-preserve CRLF when editing: git normalises on commit,
+  and a file that mixes both endings makes every later diff unreadable. Commits that
+  only reformat go in `.git-blame-ignore-revs`; enable it locally with
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 - Standard library `logging`: each module does `logger = logging.getLogger(__name__)`,
   giving the hierarchy `pysatochip.<module>`. Module loggers **must stay at NOTSET**
   — never call `logger.setLevel()` at import time or from a constructor, and never
