@@ -1188,7 +1188,7 @@ class CardConnector:
         if authentikey:
             coordy= authentikey.get_public_key_bytes(compressed=False)
             coordy= list(coordy[33:])
-            data= response + [len(coordy)&0xFF00, len(coordy)&0x00FF] + coordy
+            data= response + [(len(coordy)>>8)&0xFF, len(coordy)&0xFF] + coordy
             lc= len(data)
             apdu=[cla, ins, p1, p2, lc]+data
             (response, sw1, sw2) = self.card_transmit(apdu)
@@ -1237,45 +1237,51 @@ class CardConnector:
             self.card_bip32_get_authentikey()
 
         # send apdu
-        while (True):
-            (response, sw1, sw2) = self.card_transmit(apdu)
+        # single exchange: every branch below returns or raises, so the
+        # `while (True)` that used to wrap this never actually looped
+        (response, sw1, sw2) = self.card_transmit(apdu)
 
-            # if there is no more memory available, erase cache...
-            #if self.get_sw12(sw1,sw2)==JCconstants.SW_NO_MEMORY_LEFT:
-            if (sw1==0x9C) and (sw2==0x01):
-                logger.info("[card_bip32_get_extendedkey] Reset memory...")#debugSatochip
-                apdu[3]=apdu[3]^0x80
-                response, sw1, sw2 = self.card_transmit(apdu)
-                apdu[3]=apdu[3]&0x7f # reset the flag
-            # other (unexpected) error
-            if (sw1!=0x90) or (sw2!=0x00):
-                raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})', sw1, sw2)
-            if (sw1==0x90) and (sw2==0x00):
-                if (option_flags & 0x04) == 0x04: # BIP85
-                    entropy_bytes= self.parser.parse_bip32_get_extendedkey_bip85(response)
-                    return entropy_bytes
-                elif (option_flags & 0x02) == 0x00: # BIP32 pubkey
-                    if ( (response[32]&0x80)== 0x80):
-                        logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
-                        (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
-                        coordy= pubkey.get_public_key_bytes(compressed=False)
-                        coordy= list(coordy[33:])
-                        authcoordy= self.parser.authentikey.get_public_key_bytes(compressed=False)
-                        authcoordy= list(authcoordy[33:])
-                        data= response+[len(coordy)&0xFF00, len(coordy)&0x00FF]+coordy
-                        apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]
-                        apdu_opt= apdu_opt+data
-                        response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
-
+        # if there is no more memory available, erase cache...
+        #if self.get_sw12(sw1,sw2)==JCconstants.SW_NO_MEMORY_LEFT:
+        if (sw1==0x9C) and (sw2==0x01):
+            logger.info("[card_bip32_get_extendedkey] Reset memory...")#debugSatochip
+            # Set the erase flag, do not toggle it: XOR cleared it again when
+            # the caller had already asked for it, and the following `&0x7f`
+            # then cleared bit 7 unconditionally, discarding a flag the caller
+            # had set. Restore exactly what was passed in.
+            saved_p2= apdu[3]
+            apdu[3]= saved_p2 | 0x80
+            response, sw1, sw2 = self.card_transmit(apdu)
+            apdu[3]= saved_p2
+        # other (unexpected) error
+        if (sw1!=0x90) or (sw2!=0x00):
+            raise UnexpectedSW12Error(f'Unexpected error  (error code {hex(256*sw1+sw2)})', sw1, sw2)
+        if (sw1==0x90) and (sw2==0x00):
+            if (option_flags & 0x04) == 0x04: # BIP85
+                entropy_bytes= self.parser.parse_bip32_get_extendedkey_bip85(response)
+                return entropy_bytes
+            elif (option_flags & 0x02) == 0x00: # BIP32 pubkey
+                if ( (response[32]&0x80)== 0x80):
+                    logger.info("[card_bip32_get_extendedkey] Child Derivation optimization...")#debugSatochip
                     (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
-                    if sid is None:
-                        # the card now holds this key for signing with keynbr 0xFF
-                        self._last_bip32_derivation= Bip32Derivation(bytes(path), sid, option_flags,
-                            pubkey.get_public_key_bytes(compressed=True), bytes(chaincode))
-                    return (pubkey, chaincode)
-                else: # BIP32 privkey
-                    (privkey, chaincode)= self.parser.parse_bip32_get_extended_privkey(response)
-                    return (privkey, chaincode)
+                    coordy= pubkey.get_public_key_bytes(compressed=False)
+                    coordy= list(coordy[33:])
+                    authcoordy= self.parser.authentikey.get_public_key_bytes(compressed=False)
+                    authcoordy= list(authcoordy[33:])
+                    data= response+[(len(coordy)>>8)&0xFF, len(coordy)&0xFF]+coordy
+                    apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]
+                    apdu_opt= apdu_opt+data
+                    response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
+
+                (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
+                if sid is None:
+                    # the card now holds this key for signing with keynbr 0xFF
+                    self._last_bip32_derivation= Bip32Derivation(bytes(path), sid, option_flags,
+                        pubkey.get_public_key_bytes(compressed=True), bytes(chaincode))
+                return (pubkey, chaincode)
+            else: # BIP32 privkey
+                (privkey, chaincode)= self.parser.parse_bip32_get_extended_privkey(response)
+                return (privkey, chaincode)
 
     def card_bip32_get_xpub(self, path, xtype, is_mainnet, sid=None):
         ''' Get the BIP32 xpub for given path.

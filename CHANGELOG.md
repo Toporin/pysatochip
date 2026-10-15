@@ -28,6 +28,22 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Two APDU-construction bugs in `card_bip32_get_extendedkey()`.
+
+The coordy length was encoded as `[len & 0xFF00, len & 0x00FF]`, masking the high byte instead
+of shifting it, so any length of 256 or more would put a value above 255 into a byte list. It
+is harmless today only because coordy is always 32 bytes; it now shifts, at both of the two
+places that built this field.
+
+The out-of-memory retry did `apdu[3] = apdu[3] ^ 0x80`, which *toggles* the erase flag rather
+than setting it: a caller that had already set bit 7 had it cleared instead, so the retry asked
+the card not to erase. The following `apdu[3] &= 0x7f` then cleared bit 7 unconditionally,
+discarding a flag the caller had explicitly passed. The retry now sets the flag and restores
+the caller's original value.
+
+The `while (True)` wrapping that exchange has also been removed: every branch inside it returns
+or raises, so it never looped.
+
 Two pieces of card state were recorded in the wrong place.
 
 `satocash_get_status()` wrote the Satocash "PIN required" flag into `self.is_seeded`, the
