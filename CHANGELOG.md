@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `satodime_set_unlock_secret()` now only claims ownership when a secret is set.
 - `satodime_get_pubkey()` checks the status word before parsing.
 - `card_bip32_set_authentikey_pubkey()` logs a warning on failure.
+- `card_transmit()` recovers when the card loses the secure-channel session (applet deselected, card reset or reader power-off during an idle period). It re-initiates the channel and retries the command once on the whole `0x9C20`-`0x9C23` family, not just `0x9C21`: old applets keep the "initialized" flag persistent while the session keys live in transient memory, so a reset surfaced as `0x9C22`/`0x9C23` and failed the command. The retry is bounded on purpose — a persistent `0x9C22`/`0x9C23` can indicate tampering on the PC/SC path. `card_verify_PIN_simple()` got the same treatment.
 - **CLI:**
   - The command is now detected with `ctx.invoked_subcommand` instead of `sys.argv[1]`. Global options and abbreviated names now work.
   - A shared-`set()` bug made `satocash-export-tokenv4` select proofs from other mints.

@@ -300,24 +300,43 @@ class CardConnector:
     def card_transmit(self, plain_apdu):
         logger.debug("In card_transmit")
 
+        sc_retries= 0
         while(self.card_present):
-            
+
             #encrypt apdu
             ins= plain_apdu[1]
             if (self.needs_secure_channel) and (ins not in [0xA4, 0x81, 0x82, 0xFF, JCconstants.INS_GET_STATUS]):
                 apdu = self.card_encrypt_secure_channel(plain_apdu)
             else:
                 apdu= plain_apdu
-                
+
             # transmit apdu
             (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
-            
+
             # PIN authentication is required
             if (sw1==0x9C) and (sw2==0x06):
                 (response, sw1, sw2)= self.card_verify_PIN_simple()
-            # secure channel not initialized
-            elif (sw1==0x9C) and (sw2==0x21):
-                logger.error("In card_transmit secure channel not initialized (0x9C21)")
+            # secure channel session lost on the card side
+            # 0x9C20: secure channel required (we sent plaintext)
+            # 0x9C21: secure channel not initialized
+            # 0x9C22: wrong IV (counter desync)
+            # 0x9C23: wrong MAC (key desync)
+            # The card wiped its session state (applet deselected, card reset or
+            # reader power-off during an idle period). Old applets keep the
+            # "initialized" flag persistent while the session keys live in
+            # transient memory, so a reset can surface as 0x9C22/0x9C23 rather
+            # than 0x9C21. Re-establish the channel and retry the APDU once with
+            # fresh keys. The retry is bounded on purpose: a persistent
+            # 0x9C22/0x9C23 can also indicate tampering on the PC/SC path.
+            # (ins 0x81 is the channel initiation itself: never re-initiate it.)
+            elif (sw1==0x9C) and (sw2>=0x20) and (sw2<=0x23) and (ins != 0x81):
+                if sc_retries > 0:
+                    return (response, sw1, sw2)
+                sc_retries+= 1
+                logger.warning(f"In card_transmit: secure channel error (error code {hex(256*sw1+sw2)}), re-initiating secure channel and retrying once")
+                if sw2==0x20:
+                    # the card just told us it requires a secure channel
+                    self.needs_secure_channel= True
                 self.card_initiate_secure_channel()
             #decrypt response
             elif (sw1==0x90) and (sw2==0x00):
@@ -2101,9 +2120,12 @@ class CardConnector:
             apdu = self.card_encrypt_secure_channel(apdu)
         response, sw1, sw2 = self.cardservice.connection.transmit(apdu)
 
-        # secure channel not initialized
-        if sw1 == 0x9c and sw2 == 0x21:
-            logger.error("In card_verify_PIN_simple secure channel not initialized (0x9C21)")
+        # secure channel session lost on the card side (same recovery as card_transmit)
+        if sw1 == 0x9c and 0x20 <= sw2 <= 0x23:
+            logger.warning(f"In card_verify_PIN_simple: secure channel error (error code {hex(256*sw1+sw2)}), re-initiating secure channel and retrying once")
+            if sw2 == 0x20:
+                # the card just told us it requires a secure channel
+                self.needs_secure_channel= True
             self.card_initiate_secure_channel()
             #raise UninitializedSecureChannelError('Secure channel is not initialized')
             # resend verify PIN command
