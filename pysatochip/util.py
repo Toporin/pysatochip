@@ -53,12 +53,9 @@ def assert_bytes(*args):
     """
     porting helper, assert args type
     """
-    try:
-        for x in args:
-            assert isinstance(x, (bytes, bytearray))
-    except:
-        print('assert bytes failed', list(map(type, args)))
-        raise
+    for x in args:
+        if not isinstance(x, (bytes, bytearray)):
+            raise TypeError('expected bytes, got %s' % type(x).__name__)
 
 def var_int(i):
     # https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer
@@ -91,6 +88,12 @@ def msg_magic(message: bytes, altcoin=None) -> bytes:
         return message_full
 
 __b58chars = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+assert len(__b58chars) == 58
+# base_encode(..., base=43) referenced this without it ever being defined,
+# so the base 43 the guard below advertises raised NameError. Alphabet and
+# ordering as in Electrum, which is what this helper was ported from.
+__b43chars = b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$*+-./:'
+assert len(__b43chars) == 43
 
 def EncodeBase58Check(vchIn: bytes) -> str:
     hash = sha256d(vchIn)

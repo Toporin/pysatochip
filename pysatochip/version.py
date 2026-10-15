@@ -73,7 +73,13 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 #          Satochip applet v0.16-0.0 and factory reset v3 (single APDU).
 # v0.18.4: fix: derive (and tweak) the key again and resend the command when the card
 #          returns 0x9C13 because it lost its transient derived keys (applet v0.16-0.0).
+# v0.18.5: security: stop leaking secrets through logs and stdout (private keys were
+#          printed by satochip_import_privkey, xprv was logged at INFO, and decrypted
+#          card responses carrying exported masterseeds were logged at DEBUG). APDU
+#          logging is now deny-by-default. Secure-channel AES moved off pure-python
+#          pyaes onto cryptography/pycryptodomex; wire format unchanged. Minimum
+#          Python is now 3.9, which the code already required.
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 4
+PYSATOCHIP_REVISION= 5
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

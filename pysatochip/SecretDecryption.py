@@ -27,17 +27,22 @@ from cryptography.hazmat.backends import default_backend as CG_default_backend
 from pysatochip import ec_backend
 from pysatochip.JCconstants import *
 
-logging.basicConfig(level=logging.ERROR, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
 logger = logging.getLogger(__name__)
-logger.warning("loglevel: "+ str(logger.getEffectiveLevel()) )
+# NB: no basicConfig()/setLevel() at import time -- this module is importable as
+# part of the pysatochip package, and configuring the root logger there would
+# hijack the logging setup of whatever application imported us. Both belong in
+# __main__, below, where this file is used as a standalone script.
 
 SECRET_CST_SC = b"seckeysecmac"
 
-parser = argparse.ArgumentParser(description='Decrypt Encrypted JSON Exports from Seedkeeper')
-parser.add_argument('--privkey', required = True,
+
+def _build_arg_parser():
+	parser = argparse.ArgumentParser(description='Decrypt Encrypted JSON Exports from Seedkeeper')
+	parser.add_argument('--privkey', required = True,
 					help="Private key to attempt decryption of the encrypted secret. (In raw hex format)")
-parser.add_argument('--secret-json-file', required = True,
+	parser.add_argument('--secret-json-file', required = True,
 					help="Path to file containing encrypted secret(s) in JSON format")
+	return parser
 
 def unpad(s): return s[0:-ord(s[-1:])]
 
@@ -93,7 +98,8 @@ def Decrypt_Secret(privateKey, export_data):
 	return decrypted_secrets
 
 if __name__ == '__main__':
-	args = parser.parse_args()
+	logging.basicConfig(level=logging.ERROR, format='%(levelname)s [%(module)s] %(funcName)s | %(message)s')
+	args = _build_arg_parser().parse_args()
 	# Opening JSON and loading file
 	f = open(args.secret_json_file)
 	export_data = json.load(f)

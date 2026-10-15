@@ -1,18 +1,25 @@
-import pyaes
 import hmac
 import logging 
 from os import urandom
-from hashlib import sha1, sha256
+from hashlib import sha1
 
+from . import aes_backend
+from . import set_log_level
 from . import ec_backend
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 class SecureChannel:
 
-    def __init__(self, loglevel= logging.WARNING):
-        logger.setLevel(loglevel)
+    def __init__(self, loglevel= None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
         self.initialized_secure_channel= False
         self.sc_privkey= None
@@ -49,15 +56,6 @@ class SecureChannel:
         mac = hmac.new(self.shared_key, "sc_mac".encode('utf-8'), sha1)
         self.mac_key= mac.digest()
         
-        # alternative derivation
-        # tmp_key= sha256(self.shared_key).digest()
-        # self.derived_key = tmp_key[:16]
-        # tmp_key= sha256(tmp_key).digest()
-        # self.mac_key= tmp_key[:20]
-        
-        # logger.debug("Derived_key key:"+ self.derived_key.hex()) #debug
-        # logger.debug("Mac_key key:"+ self.mac_key.hex()) #debug
-        
         self.initialized_secure_channel= True
             
     def encrypt_secure_channel(self, data_bytes):
@@ -65,19 +63,17 @@ class SecureChannel:
         if not self.initialized_secure_channel:
             raise UninitializedSecureChannelError('Secure channel is not initialized')
         
-        ## for encryption, the data is padded with PKCS#7 (done by PADDING_DEFAULT)
-        # blocksize= 16
-        # size=len(apdu)
-        # padsize= blocksize - (size%blocksize)
-        # apdu= apdu+ [padsize]*padsize
-        
         key= self.derived_key
+        # 96 bits of randomness plus the session counter. The host uses the odd
+        # counters and the applet the even ones, so the two directions can never
+        # collide on an IV within a session.
         iv= urandom(12)+(self.sc_IVcounter).to_bytes(4, byteorder='big')
-        
-        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
-        aes = pyaes.Encrypter(aes_cbc, padding=pyaes.PADDING_DEFAULT)
-        ciphertext = aes.feed(data_bytes) + aes.feed()
-        
+
+        # AES-128-CBC + PKCS#7, as fixed by the applet. aes_backend picks a
+        # hardened implementation (cryptography / pycryptodomex) and only falls
+        # back to the pure-python pyaes when neither is installed.
+        ciphertext = aes_backend.cbc_encrypt(key, iv, data_bytes)
+
         self.sc_IVcounter+=2
         
         data_to_mac= iv + len(ciphertext).to_bytes(2, byteorder='big') + ciphertext
@@ -92,20 +88,27 @@ class SecureChannel:
             raise UninitializedSecureChannelError('Secure channel is not initialized')
         
         key= self.derived_key
-        
-        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
-        aes = pyaes.Decrypter(aes_cbc, padding=pyaes.PADDING_DEFAULT)
-        decrypted = aes.feed(ciphertext) + aes.feed() 
-        
-        # #remove padding (already done with PADDING_DEFAULT)
-        # #logger.debug(f'Plaintext with padding: {toHexString(plaintext)}')
-        # plaintext= list(plaintext)
-        # pad= plaintext[-1]
-        # plaintext=plaintext[0:-pad]
-        # #logger.debug(f'Plaintext without padding: {toHexString(plaintext)}')
-        
+
+        # The card response carries no MAC (the applet does not send one), so
+        # everything here is attacker-malleable on a hostile reader/PCSC path.
+        # Validate the shape and the padding and surface a SecureChannelError
+        # rather than letting a mangled response through, or letting whatever
+        # the cipher backend happens to raise escape to the caller.
+        if len(iv) != aes_backend.AES_BLOCK_SIZE:
+            raise SecureChannelError(
+                f'Wrong IV length: expected {aes_backend.AES_BLOCK_SIZE} got {len(iv)}')
+        try:
+            decrypted = aes_backend.cbc_decrypt(key, iv, ciphertext)
+        except aes_backend.InvalidPaddingError as ex:
+            raise SecureChannelError(f'Failed to decrypt card response: {ex}')
+
         return list(decrypted)
             
 class UninitializedSecureChannelError(Exception):    
     """Raised when the secure channel is not initialized"""
-    pass   
+    pass
+
+
+class SecureChannelError(Exception):
+    """Raised when a secure channel message is malformed or undecryptable"""
+    pass

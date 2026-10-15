@@ -171,7 +171,8 @@ class AliasedGroup(click.Group):
 @click.command(cls=AliasedGroup)
 @click.option("--verbose", is_flag=True, help="Provide detailed logs")
 @click.option("--devicefilter", default=None, help="Filter only certain devices [satochip, seedkeeper, satodime]")
-def main(verbose, devicefilter):
+@click.pass_context
+def main(ctx, verbose, devicefilter):
 
     loglevel = logging.WARNING
     if verbose:
@@ -179,13 +180,19 @@ def main(verbose, devicefilter):
         logger.setLevel(loglevel)
         logger.debug("In main()")
 
+    # Ask Click which command was invoked rather than reading sys.argv[1],
+    # which is the first *argument* and so is the global option whenever one
+    # comes before the command. AliasedGroup resolves abbreviations to the full
+    # name, so prefixes resolve correctly here too.
+    command_name = ctx.invoked_subcommand or ""
+
     # Unless devicefilter has been specified, infer it based off the command (if possible)
     if not devicefilter:
-        command_type = sys.argv[1].split("-")[0]
+        command_type = command_name.split("-")[0]
         if command_type in ["satochip", "seedkeeper", "satodime", "satocash"]:
             devicefilter = command_type
 
-    if "util-" not in sys.argv[1][:5]:
+    if not command_name.startswith("util-"):
         global cc
         # Connect to the card and get ready for a command
         cc = CardConnector(None, loglevel, devicefilter)
@@ -277,10 +284,13 @@ def common_get_card_label():
     except Exception as e:
         print(e)
 
-@main.command()
-@click.option("--label", default="", help="Device Label.")
-def common_set_card_label(label):
-    """Sets a plain text label for the card (Optional)"""
+def set_card_label(label):
+    """Set a plain text label on the card.
+
+    Plain function on purpose: common_initial_setup() needs to reuse this, and
+    calling the click.Command below would run Click's standalone main(), which
+    re-parses argv, re-prompts for the PIN and then sys.exit()s.
+    """
     try:
         if cc.card_type != "Satodime":
             # TODO: for satodime, may fail if performed via NFC (needs ownership)
@@ -298,6 +308,13 @@ def common_set_card_label(label):
             print("Device Label Updated")
     except Exception as e:
         print(e)
+
+
+@main.command()
+@click.option("--label", default="", help="Device Label.")
+def common_set_card_label(label):
+    """Sets a plain text label for the card (Optional)"""
+    set_card_label(label)
 
 @main.command()
 def common_get_card_ndef():
@@ -456,10 +473,13 @@ def common_set_feature_policy(feature_id, feature_policy):
     except Exception as e:
         print(e)
 
-@main.command()
-@click.option("--label", default="", help="Card Label")
-def common_initial_setup(label):
-    """Run the initial card setup process"""
+def initial_setup(label=""):
+    """Run the initial card setup process.
+
+    Plain function on purpose, for the same reason as set_card_label():
+    satodime_ownership_claim() reuses it, and invoking the click.Command would
+    re-enter Click's argument parsing and exit the process.
+    """
 
     if cc.card_type == "Satodime":
         pin_0 = list("1234".encode('utf8')) # This isn't actually used in Satodime, so can be anything
@@ -510,7 +530,14 @@ def common_initial_setup(label):
         print()
 
     if len(label) > 0:
-        common_set_card_label(["--label", label])
+        set_card_label(label)
+
+
+@main.command()
+@click.option("--label", default="", help="Card Label")
+def common_initial_setup(label):
+    """Run the initial card setup process"""
+    initial_setup(label)
 
 """##############################
 #        COMMON PIN MGMT        #        
@@ -1955,7 +1982,6 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                     
                     offset = 0
                     secret_raw_hex = secret_dict['secret']
-                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
                     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
                     
                     mnemonic_size = secret_raw_bytes[offset]
@@ -2032,7 +2058,6 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                     # this format is backward compatible with Masterseed (BIP39 info appended after Masterseed)
                     # mnemonic in compressed format using entropy (16-32 bytes)
                     secret_raw_hex = secret_dict['secret']
-                    logger.info(f"secret_raw_hex: {secret_raw_hex}")
                     secret_raw_bytes = bytes.fromhex(secret_raw_hex)
                     
                     offset = 0
@@ -2345,7 +2370,9 @@ def satodime_ownership_transfer(unlock_secret, unlock_counter):
 @main.command()
 def satodime_ownership_claim():
     """Claim Ownership"""
-    common_initial_setup(["--satodime"])
+    # initial_setup() branches on cc.card_type == "Satodime" itself, so there
+    # is nothing to pass here.
+    initial_setup()
 
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot")
@@ -2796,7 +2823,9 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_s
         for index, value in enumerate(response):
             proof_info_str = value
             if info_type == 0: # state
-                proof_info_str = dic_state_by_code.get((value ^ 0x03), "UNKNOWN") # MASK 0x03 to extract spent state.
+                # mask off the state bits: the upper bits carry flags such as
+                # P2PK, which the lookup below must not see
+                proof_info_str = dic_state_by_code.get((value & 0x03), "UNKNOWN")
                 if value & 0x80 == 0x80:
                     # P2PK flag
                     proof_info_str += " P2PK"
@@ -2815,7 +2844,7 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_s
             elif info_type == 4: # unit
                 proof_info_str = dic_unit_by_code.get(value, "UNKNOWN")
 
-            print(f"index: {index_start + index} - info: {proof_info_str} - type: {dic_info_by_code.get(info_type, "UNKNOWN")}")
+            print(f"index: {index_start + index} - info: {proof_info_str} - type: {dic_info_by_code.get(info_type, 'UNKNOWN')}")
             # print(f"index: {index_start + index}")
             # print(f"info_raw: {value}")
             # print(f"info_str: {proof_info_str}")
@@ -3048,8 +3077,11 @@ def satocash_export_tokenv4(unit: str, amount: int):
         # compute balance for each mint
         # also list keysets by mint and proofs by keyset
         amount_unspent_by_mints = max_nb_mints * [0]
-        keyset_indexes_by_mint = max_nb_mints * [set()]
-        proof_indexes_by_keyset = max_nb_keysets * [set()]
+        # One set per index: `n * [set()]` would alias a single set at every
+        # index and record every keyset against every mint. The neighbouring
+        # `n * [0]` lines are safe only because ints are immutable.
+        keyset_indexes_by_mint = [set() for _ in range(max_nb_mints)]
+        proof_indexes_by_keyset = [set() for _ in range(max_nb_keysets)]
         amount_available = 0
         mint_index = None
         for proof_index in range(max_nb_proofs):

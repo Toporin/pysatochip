@@ -9,21 +9,28 @@ except Exception:  # pragma: no cover - optional dependency
     HAS_OPENSSL = False
 
 
+from . import set_log_level
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 class CertificateValidator:
     """Validate device certificate chains using OpenSSL or pure Python."""
 
-    def __init__(self, backend: str = "auto", loglevel: int = logging.WARNING):
+    def __init__(self, backend: str = "auto", loglevel: int = None):
         """Create a validator.
 
         :param backend: ``'openssl'``, ``'pycryptodomex'`` or ``'auto'``.
             In ``auto`` mode OpenSSL is used when available.
-        :param loglevel: logger verbosity
+        :param loglevel: convenience for pysatochip.set_log_level(); sets the
+            level of the whole package, not of this instance. None leaves the
+            application's logging configuration alone.
         """
         self.backend = backend
-        logger.setLevel(loglevel)
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
     
     def validate_certificate_chain(self, device_pem, device_type):

@@ -1,7 +1,7 @@
 pyscard>=1.9.9 #2.0.0
-pyaes>=1.6.1
-cryptography>=3.3.2 # primary backend for all private-key EC operations
+pyaes>=1.6.1 # last-resort secure-channel AES, for builds without cryptography/pycryptodomex
+cryptography>=42.0.0 # primary backend for all private-key EC operations and for secure-channel AES
 pyopenssl>=20.0.0 # for certificate chain validation
-pycryptodomex>=3.18 # fallback when OpenSSL is unavailable
+pycryptodomex>=3.18 # fallback when OpenSSL is unavailable (certificates + secure-channel AES)
 certifi
 

@@ -1,0 +1,12 @@
+# Line endings are a property of this repository, not of each contributor's
+# core.autocrlf. Git stores every text file with LF; the working tree follows
+# the platform.
+#
+# Without this, a file first committed with CRLF kept CRLF forever -- git does
+# not renormalise a path whose index entry already has CRLF -- and became mixed
+# as soon as an editor using LF added lines to it. Three files had ended up that
+# way before this was introduced.
+#
+# Every tracked file here is text (.py, .cert PEM, .md, .txt, .in). If binary
+# assets are ever committed, give them an explicit rule, e.g. `*.png binary`.
+* text=auto

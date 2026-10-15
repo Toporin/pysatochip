@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.5]:
+
+**Security: stop leaking secrets through logs and stdout; harden secure-channel AES**
+
+### Security
+- **Secrets no longer printed or logged.** Removed 12 `print()` calls, including the one in `satochip_import_privkey()` that dumped the raw private key. The xprv is no longer logged in `card_bip32_get_xpub()`, and the CLI no longer logs SeedKeeper masterseeds or mnemonics.
+- **APDU logging uses an allow-list (`_LOGGABLE_INS`)** for both commands and responses. Bodies of unlisted instructions are masked. Previously, `INS_IMPORT_KEY`, SeedKeeper import/export and all decrypted responses were logged in full at DEBUG.
+- **Secure channel checks the status word before parsing.** A card returning `0x6D00` with a rogue ephemeral key could previously establish a usable channel. `self.sc` now stays `None` on failure.
+- **Card-returned key material is now signature-checked.** This applies to `card_bip32_get_liquid_master_blinding_key()` and `satocash_get_bip32_extendedkey()`, where the pubkey is also checked to be on the curve. INS 0x6D is not yet implemented by any Satocash applet, so the latter is untested on hardware.
+- **SeedKeeper:**
+  - A fingerprint mismatch on import or export now raises `SeedKeeperError` instead of only logging. The import error names the stored id.
+  - Whether the signature is verified now depends on `is_secure_export`, not the card-chosen `sign_size`. A card can no longer skip verification by returning 20 bytes.
+  - `seedkeeper_derive_master_password()` always verifies and raises on failure. It also now initialises its authentikey.
+- **`get_trusted_pubkey()` fails closed.** A missing authentikey, an empty signature or a failed verification now raises `ValueError`. Previously the key was returned unverified.
+- **AES backend:** the secure channel now uses `cryptography`, then `pycryptodomex`, and falls back to `pyaes` with a warning. This avoids `pyaes`'s key-dependent table lookups. The wire format is unchanged. PKCS#7 padding, IV and ciphertext lengths are now validated and raise `SecureChannelError`.
+
+### Fixes
+- `base_encode(base=43)` raised `NameError`. The alphabet is now defined, matching Electrum.
+- `card_bip32_get_xpub()`/`get_xprv()` now accept bytes, `bytearray` or a list of ints as `path`.
+- `Satochip2FA.do_challenge_response()` retried forever at full speed when the server was unreachable. The backoff and timeout now work, and `reply_encrypt` is always set.
+- `parse_to_compact_sig()` no longer reads at negative indices.
+- `get_sw12()` returned `16*sw1+sw2` instead of `256*sw1+sw2`.
+- `card_reset_factory_v3()` passed `sw1` twice to `UnexpectedSW12Error`.
+- `card_change_PIN()` now raises on any unexpected status.
+- `card_import/export_trusted_pubkey()` now reject unexpected statuses before parsing.
+- `card_bip32_get_extendedkey()` had two bugs. The coordy length masked the high byte instead of shifting it. The out-of-memory retry toggled the erase flag instead of setting it. A dead `while True` loop was also removed.
+- `satocash_get_status()` now writes `needsPIN` instead of overwriting `is_seeded`.
+- `satodime_set_unlock_secret()` now only claims ownership when a secret is set.
+- `satodime_get_pubkey()` checks the status word before parsing.
+- `card_bip32_set_authentikey_pubkey()` logs a warning on failure.
+- `card_transmit()` recovers when the card loses the secure-channel session (applet deselected, card reset or reader power-off during an idle period). It re-initiates the channel and retries the command once on the whole `0x9C20`-`0x9C23` family, not just `0x9C21`: old applets keep the "initialized" flag persistent while the session keys live in transient memory, so a reset surfaced as `0x9C22`/`0x9C23` and failed the command. The retry is bounded on purpose — a persistent `0x9C22`/`0x9C23` can indicate tampering on the PC/SC path. `card_verify_PIN_simple()` got the same treatment.
+- **CLI:**
+  - The command is now detected with `ctx.invoked_subcommand` instead of `sys.argv[1]`. Global options and abbreviated names now work.
+  - A shared-`set()` bug made `satocash-export-tokenv4` select proofs from other mints.
+  - `satocash-get-proof-info` decoded proof state with XOR instead of a mask.
+  - Commands calling other commands exited the process early. `common-initial-setup --label` exited at the label step, and `satodime-ownership-claim` never worked.
+
+### Minor
+Normalise all text files to LF. Whitespace only: this commit changes no content. 
+9 of 68 tracked files were not pure LF. .gitattributes now makes this a property of the repository rather than of each
+contributor's core.autocrlf, which is invisible and does not fix anything retroactively.
+
+### Changes
+- **`card_parse_transaction()` is deprecated** and now returns `sha256d(transaction)` directly. The return contract is unchanged. `TxParser`, which could hang at 100% CPU on malformed input, is removed, along with the dead `parse_parse_transaction()`. New code should use `util.sha256d()` with `card_sign_transaction_hash()`.
+- **Logging belongs to the application.** The package installs a `NullHandler` and exposes `set_log_level()`. `loglevel` constructor arguments default to `None` and no longer override the host's configuration.
+- `python_requires >= 3.9`. A nested-quote f-string that broke the CLI below 3.12 is fixed. The minimum `cryptography` version is now 42.0.0.
+
+### Upgrade notes
+- **Several silent failures now raise:** SeedKeeper fingerprint and signature checks, `get_trusted_pubkey()`, `card_change_PIN()`, trusted-pubkey import/export and secure-channel setup. Callers checking `dic['error_msg']` should catch the exception instead.
+- **Logging output changes:**
+  - Applications without logging configured no longer see pysatochip warnings on stderr.
+  - Applications whose root logger is at DEBUG now get pysatochip debug output.
+  - To restore the old behaviour, call `logging.getLogger('pysatochip').setLevel(logging.WARNING)`.
+
 ## [0.18.4]:
 
 Fix: restore the derived keys when the card has lost them (applet v0.16-0.0)

@@ -27,8 +27,12 @@ from .ecc import ECPubkey, ECPrivkey, InvalidECPointException, sig_string_from_d
 from .JCconstants import *
 from .slip44 import *
 
+from . import set_log_level
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
+# so that a level set on the `pysatochip` package logger cascades to all of
+# them -- see pysatochip.set_log_level().
 
 MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
                     "wallet, ensure you can pair with your device, or that you have "
@@ -37,8 +41,12 @@ MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
 
 class CardDataParser:
 
-    def __init__(self, loglevel= logging.WARNING):
-        logger.setLevel(loglevel)
+    def __init__(self, loglevel= None):
+        # `loglevel` is a convenience for pysatochip.set_log_level(): it sets the
+        # level of the whole package, not of this instance. Leave it as None to
+        # let the application own its logging configuration.
+        if loglevel is not None:
+            set_log_level(loglevel)
         logger.debug("In __init__")
         self.authentikey=None
         self.authentikey_coordx= None
@@ -167,8 +175,6 @@ class CardDataParser:
         if self.authentikey is None:
             raise ValueError("Authentikey not set!")
 
-        logger.debug(f"[CardDataParser] parse_bip32_get_extendedkey_bip85: response_hex: {bytes(response).hex()}")
-
         # double signature: first is self-signed, second by authentikey
         # firs self-signed sig: data= coordx
         logger.debug('[CardDataParser] parse_bip32_get_extendedkey_bip85: first signature recovery')
@@ -238,9 +244,9 @@ class CardDataParser:
                 authentikey= self.get_pubkey_from_signature(self.authentikey_coordx, msg2, signature2)
                 if ( authentikey.get_public_key_bytes(compressed=False) != self.authentikey.get_public_key_bytes(compressed=False) ):
                     raise ValueError("Recovered authentikey does not correspond to registered authentikey!")
-                logger.info("In parse_initiate_secure_channel: successfuly recovered authentikey:"+ authentikey.get_public_key_bytes(compressed=False).hex()) #debug
+                logger.debug("In parse_initiate_secure_channel: successfuly recovered authentikey:"+ authentikey.get_public_key_bytes(compressed=False).hex()) #debug
                     
-            logger.info("In parse_initiate_secure_channel: successfuly recovered pubkey:"+ self.pubkey.get_public_key_bytes(compressed=False).hex()) #debug
+            logger.debug("In parse_initiate_secure_channel: successfuly recovered pubkey:"+ self.pubkey.get_public_key_bytes(compressed=False).hex()) #debug
             return (self.pubkey)
     
     ##############
@@ -417,48 +423,43 @@ class CardDataParser:
         return pk
     
     def get_trusted_pubkey(self, response):
+        ''' Recover the trusted pubkey from the card response, after checking
+        that the card signed it with its authentikey.
+
+        The signature is the only thing binding this key to this card, and the
+        trusted pubkey is what a secure secret import (SeedKeeper -> Satochip)
+        encrypts to. A caller that accepts an unverified key here would happily
+        export a seed to a key chosen by whoever is on the wire. Every failure
+        path therefore raises instead of returning a value.
+        '''
+        if self.authentikey is None:
+            raise ValueError("Authentikey not set!")
+
         pubkey_size= response[0]*256+response[1]
         if (pubkey_size !=65):
             raise RuntimeError(f'Error while recovering trusted pubkey: wrong pubkey size, expected 65 but received {pubkey_size}')
         data= response[0:(2+pubkey_size)]
         sig_size= response[2+pubkey_size]*256 + response[2+pubkey_size+1] 
         sig= response[(2+pubkey_size+2):(2+pubkey_size+2+sig_size)]
-        
+        if sig_size==0:
+            # the card chooses sig_size, so an empty signature must not be a
+            # way to skip verification
+            raise ValueError("Signature missing")
+
         pubkey_hex= bytes(response[2:2+pubkey_size]).hex()
         logger.debug(f"Verifying sig for pubkey {pubkey_hex} using authentikey {self.authentikey.get_public_key_bytes(compressed=False).hex()}")
-        
+
         try:
             self.verify_signature(data, sig, self.authentikey)
         except Exception as ex:
-            logger.error('Exception in get_trusted_pubkey: ' + str(ex))
-            
+            logger.error(f"Invalid signature for trusted pubkey: {ex}")
+            raise ValueError(
+                "Invalid signature for trusted pubkey: it is not signed by the "
+                "authentikey of this card, so it must not be used to import a "
+                "secret!") from ex
+
         return pubkey_hex
     
-    ##############
-    def parse_parse_transaction(self, response):
-        '''Satochip returns: [(hash_size+2)(2b) | tx_hash(32b) | need2fa(2b) | sig_size(2b) | sig(sig_size) | txcontext]'''
-        logger.debug("In parse_to_compact_sig")
-        offset=0
-        data_size= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        txhash_size= data_size-2
-        offset+=2
-        tx_hash= response[offset:(offset+txhash_size)]
-        offset+=txhash_size
-        needs_2fa= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        needs_2fa= False if (needs_2fa==0) else True
-        offset+=2
-        sig_size= ((response[offset] & 0xff)<<8) + (response[offset+1] & 0xff)
-        sig_data= response[0:data_size+2] # txhash_size+hash+needs_2fa
-        offset+=2
-        if sig_size>0 and self.authentikey_coordx:
-            sig= response[offset:(offset+sig_size)]
-            pubkey= self.get_pubkey_from_signature(self.authentikey_coordx, sig_data, sig)
-            if pubkey != self.authentikey:
-                raise Exception("signing key is not authentikey!")
-        #todo: error checking
-
-        return (tx_hash, needs_2fa)
-
     def parse_to_compact_sig(self, sigin, recid, compressed):
         ''' convert a DER encoded signature to compact 65-byte format
             input is bytearray in DER format
@@ -479,9 +480,11 @@ class CardDataParser:
         # extract r
         lr= sigin[3]
         for i in range(32):
-            tmp= sigin[4+lr-1-i]
+            # Index only inside the guard: for i >= lr the offset goes
+            # negative, and Python would wrap it round to the end of the buffer
+            # instead of failing.
             if lr>=(i+1):
-                sigout[32-i]= tmp
+                sigout[32-i]= sigin[4+lr-1-i]
             else:
                 sigout[32-i]=0
         # extract s
@@ -492,9 +495,9 @@ class CardDataParser:
         if lt != (lr+ls+4):
             raise ValueError("Wrong lt value")
         for i in range(32):
-            tmp= sigin[5+lr+ls-i]
+            # same guard-before-index ordering as the r loop above
             if ls>=(i+1):
-                sigout[64-i]= tmp
+                sigout[64-i]= sigin[5+lr+ls-i]
             else:
                 sigout[64-i]=0
         # 1 byte header
@@ -792,11 +795,6 @@ class CardDataParser:
         digest.update(bytes(entropy_list))
         entropy_hash_bytes=digest.digest()
         if (list(entropy_hash_bytes) != privkey_list):
-            logger.debug(f"####### DEBUG ENTROPY => PRIVKEY #######")
-            logger.debug(f"entropy_list: {bytes(entropy_list).hex()}")
-            logger.debug(f"entropy_hash_bytes: {bytes(entropy_hash_bytes).hex()}")
-            logger.debug(f"privkey_list: {bytes(privkey_list).hex()}")
-            logger.debug(f"####### ######################### #######")
             raise Exception(f"Satodime error: recovered private key for keyslot {key_nbr} does not match entropy!")
         
         return (entropy_list, privkey_list, sig_list)
