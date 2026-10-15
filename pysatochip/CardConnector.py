@@ -3155,7 +3155,10 @@ class CardConnector:
                 self.needs_2FA = d["needs2FA"] = False if response[8] == 0X00 else True
             # needsPIN (satocash)
             if len(response) >= 10:
-                self.is_seeded = d["needs_pin"] = False if response[9] == 0X00 else True
+                # byte 9 is the PIN flag, so it belongs in self.needsPIN (declared
+                # in __init__ for exactly this). Writing it to self.is_seeded
+                # clobbered the Satochip seed flag with an unrelated value.
+                self.needsPIN = d["needs_pin"] = False if response[9] == 0X00 else True
             # setup status
             if len(response) >= 11:
                 self.setup_done = d["setup_done"] = False if response[10] == 0X00 else True
@@ -3830,10 +3833,16 @@ class CardConnector:
     
     def satodime_set_unlock_secret(self, unlock_secret=[]):
         if unlock_secret==[]:
+            # No secret known: the all-zero placeholder must not be mistaken for
+            # one. The `self.is_owner= False` here used to be overwritten by an
+            # unconditional `= True` on the next line, so passing no secret left
+            # the client believing it was the owner while every unlock code it
+            # computed was keyed with zeros.
             unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
             self.is_owner= False
+        else:
+            self.is_owner= True
         self.unlock_secret=unlock_secret
-        self.is_owner= True
     def satodime_set_unlock_counter(self, unlock_counter=[]):
         if unlock_counter==[]:
             unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]

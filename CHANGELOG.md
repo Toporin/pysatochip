@@ -28,6 +28,19 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Two pieces of card state were recorded in the wrong place.
+
+`satocash_get_status()` wrote the Satocash "PIN required" flag into `self.is_seeded`, the
+Satochip "a BIP32 seed is loaded" flag, so reading the status of a Satocash clobbered an
+unrelated piece of state with it. `CardConnector.__init__` already declares `self.needsPIN`
+for this, and that is where it now goes.
+
+`satodime_set_unlock_secret()` set `self.is_owner = False` when called with no secret and then
+immediately overwrote it with an unconditional `self.is_owner = True`. A client that had no
+unlock secret therefore believed it was the owner of the Satodime while every unlock code it
+computed was keyed with the all-zero placeholder. Ownership now follows the secret, and is
+dropped again if the secret is cleared.
+
 The CLI now asks Click which command was invoked instead of reading `sys.argv[1]`. That is the
 first *argument*, not the command, so any global option in front of it was mistaken for the
 command: `satochip-cli --verbose util-generate-local-keypair` inferred no device filter and
