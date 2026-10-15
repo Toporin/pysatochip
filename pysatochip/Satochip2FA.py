@@ -90,10 +90,9 @@ class Satochip2FA:
             try:
                 reply = server.get(replyhash)
             except Exception as e:
-                # Do not `continue` here. That skipped both the sleep and the
-                # timeout decrement below, so an unreachable server produced an
-                # infinite full-speed retry: the 180 s timeout never fired and
-                # this call never returned. Fall through to the backoff instead.
+                # Fall through to the backoff below rather than retrying at
+                # once: skipping the sleep and the timeout decrement would turn
+                # an unreachable server into an endless full-speed retry.
                 logger.warning(f"Exception: cannot contact server - error: {str(e)}")
                 reply = None
             if reply:

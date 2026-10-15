@@ -180,11 +180,10 @@ def main(ctx, verbose, devicefilter):
         logger.setLevel(loglevel)
         logger.debug("In main()")
 
-    # Ask Click which command was invoked instead of reading sys.argv[1]: that
-    # raised IndexError when run with no arguments at all, and saw the option
-    # rather than the command whenever one came first (`--verbose util-xyz`
-    # inferred nothing and then went on to open the card anyway). AliasedGroup
-    # resolves abbreviations to the full name, so this also works for those.
+    # Ask Click which command was invoked rather than reading sys.argv[1],
+    # which is the first *argument* and so is the global option whenever one
+    # comes before the command. AliasedGroup resolves abbreviations to the full
+    # name, so prefixes resolve correctly here too.
     command_name = ctx.invoked_subcommand or ""
 
     # Unless devicefilter has been specified, infer it based off the command (if possible)
@@ -2371,9 +2370,8 @@ def satodime_ownership_transfer(unlock_secret, unlock_counter):
 @main.command()
 def satodime_ownership_claim():
     """Claim Ownership"""
-    # initial_setup() already branches on cc.card_type == "Satodime"; the old
-    # ["--satodime"] argument was not an option of the command and made Click
-    # abort with a UsageError before anything ran.
+    # initial_setup() branches on cc.card_type == "Satodime" itself, so there
+    # is nothing to pass here.
     initial_setup()
 
 @main.command()
@@ -2825,8 +2823,8 @@ def satocash_get_proof_info(unit: str, info_type: str, index_start: int, index_s
         for index, value in enumerate(response):
             proof_info_str = value
             if info_type == 0: # state
-                # mask, as the comment always said: XOR mapped unspent<->spent,
-                # and turned every P2PK-flagged or empty slot into "UNKNOWN"
+                # mask off the state bits: the upper bits carry flags such as
+                # P2PK, which the lookup below must not see
                 proof_info_str = dic_state_by_code.get((value & 0x03), "UNKNOWN")
                 if value & 0x80 == 0x80:
                     # P2PK flag
@@ -3079,10 +3077,9 @@ def satocash_export_tokenv4(unit: str, amount: int):
         # compute balance for each mint
         # also list keysets by mint and proofs by keyset
         amount_unspent_by_mints = max_nb_mints * [0]
-        # `n * [set()]` would put the *same* set object at every index, so
-        # .add() below would record every keyset against every mint. The
-        # neighbouring `n * [0]` lines are fine only because ints are immutable
-        # and `+=` rebinds instead of mutating.
+        # One set per index: `n * [set()]` would alias a single set at every
+        # index and record every keyset against every mint. The neighbouring
+        # `n * [0]` lines are safe only because ints are immutable.
         keyset_indexes_by_mint = [set() for _ in range(max_nb_mints)]
         proof_indexes_by_keyset = [set() for _ in range(max_nb_keysets)]
         amount_available = 0

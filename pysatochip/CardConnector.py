@@ -88,13 +88,9 @@ TaprootTweak = namedtuple('TaprootTweak', 'keynbr tweak bypass_flag derivation t
 # Instructions whose APDU body carries no secret material, in either direction,
 # and may therefore be rendered in full in debug logs.
 #
-# This list is an allow-list on purpose: everything not named here has its body
-# masked. The previous deny-list approach silently leaked whatever it forgot --
-# it omitted INS_IMPORT_KEY (a raw private key) and the SeedKeeper import/export
-# instructions, and it covered only the command direction, so decrypted
-# responses carrying exported masterseeds were logged verbatim. Deny-by-default
-# means a newly added secret-bearing instruction stays masked until someone
-# deliberately clears it.
+# This is an allow-list on purpose, and it governs both directions: anything not
+# named here has its body masked, so a newly added secret-bearing instruction
+# stays masked until someone deliberately clears it.
 _LOGGABLE_INS = frozenset({
     0xA4,                                       # ISO SELECT: AID only
     0xFF,                                       # reader pseudo-APDU
@@ -393,8 +389,8 @@ class CardConnector:
         self.parser.authentikey_from_storage=None
 
     def get_sw12(self, sw1, sw2):
-        # 16*sw1 would interleave the nibbles: (0x9C, 0x01) gave 0x9C1, not
-        # 0x9C01, so every comparison against a JCconstants SW_* value failed.
+        # sw1 is the high byte: (0x9C, 0x01) is 0x9C01, which is how the
+        # JCconstants SW_* values are written.
         return 256*sw1+sw2
 
     def card_select(self):
@@ -1249,18 +1245,17 @@ class CardConnector:
             self.card_bip32_get_authentikey()
 
         # send apdu
-        # single exchange: every branch below returns or raises, so the
-        # `while (True)` that used to wrap this never actually looped
+        # single exchange: every branch below returns or raises, so there is
+        # nothing to loop over here
         (response, sw1, sw2) = self.card_transmit(apdu)
 
         # if there is no more memory available, erase cache...
         #if self.get_sw12(sw1,sw2)==JCconstants.SW_NO_MEMORY_LEFT:
         if (sw1==0x9C) and (sw2==0x01):
             logger.info("[card_bip32_get_extendedkey] Reset memory...")#debugSatochip
-            # Set the erase flag, do not toggle it: XOR cleared it again when
-            # the caller had already asked for it, and the following `&0x7f`
-            # then cleared bit 7 unconditionally, discarding a flag the caller
-            # had set. Restore exactly what was passed in.
+            # Set the erase flag rather than toggling it, and restore p2
+            # afterwards: the caller may legitimately have set bit 7 itself, and
+            # that choice must survive this retry.
             saved_p2= apdu[3]
             apdu[3]= saved_p2 | 0x80
             response, sw1, sw2 = self.card_transmit(apdu)
@@ -1314,11 +1309,9 @@ class CardConnector:
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
         else:
-            # The docstring documents `str | bytes`, but only the str branch used
-            # to bind `depth` and `bytepath`, so a bytes path raised
-            # UnboundLocalError on the next line. bip32path2bytes() packs 4 bytes
-            # per level, so depth is simply the length over 4. bytes() also
-            # accepts a bytearray or a list of ints.
+            # bip32path2bytes() packs 4 bytes per level, so for an already
+            # serialized path the depth is simply its length over 4. bytes()
+            # also accepts a bytearray or a list of ints.
             bytepath= bytes(path)
             depth= len(bytepath)//4
 
@@ -1355,11 +1348,9 @@ class CardConnector:
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
         else:
-            # The docstring documents `str | bytes`, but only the str branch used
-            # to bind `depth` and `bytepath`, so a bytes path raised
-            # UnboundLocalError on the next line. bip32path2bytes() packs 4 bytes
-            # per level, so depth is simply the length over 4. bytes() also
-            # accepts a bytearray or a list of ints.
+            # bip32path2bytes() packs 4 bytes per level, so for an already
+            # serialized path the depth is simply its length over 4. bytes()
+            # also accepts a bytearray or a list of ints.
             bytepath= bytes(path)
             depth= len(bytepath)//4
 
@@ -2281,9 +2272,9 @@ class CardConnector:
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             raise PinBlockedError(msg)
         else:
-            # Without this the method returned normally on any other status
-            # while self.pin still held the *old* value, so a caller that did
-            # not re-check sw1/sw2 believed the PIN had been changed.
+            # Any other status means the PIN was not changed. Raise rather than
+            # return: self.pin still holds the old value, and a caller that does
+            # not re-check sw1/sw2 would take this for success.
             logger.error(f"Error during PIN change: {hex(256*sw1+sw2)}")
             raise UnexpectedSW12Error(
                 f"Unexpected error during PIN change (error code {hex(256*sw1+sw2)})", sw1, sw2)
@@ -2405,9 +2396,8 @@ class CardConnector:
             finally:
                 self._sc_initializing= False
 
-            # On an error status the body is an error payload or empty, and
-            # parse_initiate_secure_channel() would index straight into it --
-            # building the session key from whatever bytes came back.
+            # On an error status the body is an error payload or empty: never
+            # derive a session key from it.
             if (sw1!=0x90 or sw2!=0x00):
                 logger.error(f"Error during secure channel initialization (error code {hex(256*sw1+sw2)})")
                 raise UnexpectedSW12Error(
@@ -2697,13 +2687,11 @@ class CardConnector:
             offset+=2
             sign= response[offset:(offset+sign_size)]
 
-            # Check signature. is_secure_export is always False here (the
-            # function raises above when it is requested), so the card must
-            # return a signature over full_data, never the 20-byte hmac of a
-            # secure export. Letting the card-chosen length select the branch
-            # made "return 20 bytes" a way to skip verification entirely, and
-            # swallowing the failure into dic['error_msg'] handed the caller a
-            # normal-looking derived master password with an unchecked signature.
+            # is_secure_export is always False here (the function raises above
+            # when it is requested), so the card must return a signature over
+            # full_data, never the 20-byte hmac of a secure export. Let a failure
+            # propagate: the derived master password must not be returned with an
+            # unchecked signature.
             self.parser.verify_signature(full_data, sign, self.parser.authentikey)
             dic['sign_list']=sign
             dic['sign']=bytes(sign).hex()
@@ -2799,11 +2787,10 @@ class CardConnector:
         if (fingerprint_from_secret == fingerprint_from_seedkeeper ):
             logger.debug("Fingerprints match !")
         else:
-            # The fingerprint exists precisely to detect that the card stored
-            # something other than what we sent. For a masterseed that means
-            # funds derived from it would be unrecoverable, so this must not be
-            # a log line the caller can miss. The secret is already on the card
-            # under `id`; report it so the caller can delete it.
+            # The fingerprint exists to detect that the card stored something
+            # other than what we sent; for a masterseed that would make funds
+            # derived from it unrecoverable. The secret is already on the card
+            # under `id`, so report it and let the caller delete it.
             logger.error(f"Fingerprint mismatch: expected {fingerprint_from_secret} but recovered {fingerprint_from_seedkeeper} ")
             raise SeedKeeperError(
                 f"Secret import failed: fingerprint mismatch, the card stored something "
@@ -2896,13 +2883,11 @@ class CardConnector:
                 offset+=2
                 sign= response[offset:(offset+sign_size)]
                 
-                # Check signature. Which form the card returns is decided by the
-                # export mode *we* asked for, not by the length the card sends
-                # back: a plain export is signed with the authentikey, while a
-                # secure export carries a 20-byte hmac keyed with the secret
-                # shared with the destination device, which only that device can
-                # verify. Branching on sign_size let any card skip verification
-                # on a plain export simply by returning 20 bytes.
+                # Which form to expect is decided by the export mode *we* asked
+                # for, never by the length the card sends back: a plain export is
+                # signed with the authentikey, while a secure export carries a
+                # 20-byte hmac keyed with the secret shared with the destination
+                # device, which only that device can verify.
                 full_data=secret_dict['header_list']+secret
                 if is_secure_export:
                     if (sign_size!=20):
@@ -2935,8 +2920,7 @@ class CardConnector:
             else:
                 # The exported bytes do not match the digest the card stored
                 # alongside them: the secret is corrupt or was tampered with in
-                # transit. Returning it anyway would hand the caller a bad seed
-                # that looks exactly like a good one.
+                # transit, and a bad seed looks exactly like a good one.
                 logger.error(f"Fingerprint mismatch: expected {secret_dict['fingerprint']} but recovered {secret_dict['fingerprint_from_secret']} ")
                 raise SeedKeeperError(
                     f"Secret export failed: fingerprint mismatch, the exported secret does "
@@ -3196,9 +3180,8 @@ class CardConnector:
                 self.needs_2FA = d["needs2FA"] = False if response[8] == 0X00 else True
             # needsPIN (satocash)
             if len(response) >= 10:
-                # byte 9 is the PIN flag, so it belongs in self.needsPIN (declared
-                # in __init__ for exactly this). Writing it to self.is_seeded
-                # clobbered the Satochip seed flag with an unrelated value.
+                # byte 9 is the PIN flag; self.is_seeded is the Satochip seed
+                # flag and is unrelated to it
                 self.needsPIN = d["needs_pin"] = False if response[9] == 0X00 else True
             # setup status
             if len(response) >= 11:
@@ -3875,10 +3858,8 @@ class CardConnector:
     def satodime_set_unlock_secret(self, unlock_secret=[]):
         if unlock_secret==[]:
             # No secret known: the all-zero placeholder must not be mistaken for
-            # one. The `self.is_owner= False` here used to be overwritten by an
-            # unconditional `= True` on the next line, so passing no secret left
-            # the client believing it was the owner while every unlock code it
-            # computed was keyed with zeros.
+            # one, or every unlock code would be computed from zeros while the
+            # client believed it was the owner.
             unlock_secret= SIZE_UNLOCK_SECRET*[0x00]
             self.is_owner= False
         else:

@@ -443,7 +443,7 @@ class CardDataParser:
         sig= response[(2+pubkey_size+2):(2+pubkey_size+2+sig_size)]
         if sig_size==0:
             # the card chooses sig_size, so an empty signature must not be a
-            # way to skip verification altogether
+            # way to skip verification
             raise ValueError("Signature missing")
 
         pubkey_hex= bytes(response[2:2+pubkey_size]).hex()
@@ -480,12 +480,9 @@ class CardDataParser:
         # extract r
         lr= sigin[3]
         for i in range(32):
-            # Index only once the guard has passed. Reading sigin[4+lr-1-i]
-            # first walked backwards past the start of the buffer for i >= lr:
-            # Python wraps a negative index round to the end, so this quietly
-            # read unrelated bytes, and raised IndexError once it went past
-            # -len(sigin). The value was discarded in that branch, which is why
-            # it never showed up.
+            # Index only inside the guard: for i >= lr the offset goes
+            # negative, and Python would wrap it round to the end of the buffer
+            # instead of failing.
             if lr>=(i+1):
                 sigout[32-i]= sigin[4+lr-1-i]
             else:
@@ -498,7 +495,7 @@ class CardDataParser:
         if lt != (lr+ls+4):
             raise ValueError("Wrong lt value")
         for i in range(32):
-            # same ordering problem as the r loop above
+            # same guard-before-index ordering as the r loop above
             if ls>=(i+1):
                 sigout[64-i]= sigin[5+lr+ls-i]
             else:

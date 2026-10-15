@@ -2,12 +2,12 @@
 """
 Hardened AES-CBC primitives for the card secure channel.
 
-pysatochip used to encrypt the secure channel with `pyaes`, a pure-python,
-table-driven AES implementation that has been unmaintained since 2017. Lookup
-tables make the cipher's memory access pattern depend on the key, which is
-observable through the CPU cache -- the same class of side channel that got the
-pure-python `ecdsa` package removed in v0.18.0 (CVE-2024-23342, issue #8), here
-applied to the secure-channel session key rather than to a long-term key.
+`pyaes`, the pure-python AES this module can still fall back to, is table-driven
+and unmaintained since 2017. Its lookup tables make the cipher's memory access
+pattern depend on the key, which is observable through the CPU cache -- the same
+class of side channel that got the pure-python `ecdsa` package removed in
+v0.18.0 (CVE-2024-23342, issue #8), here applied to the secure-channel session
+key rather than to a long-term key.
 
 The backend is therefore selected in the same spirit as ec_backend.py:
 
@@ -163,9 +163,9 @@ def pkcs7_pad(data: bytes) -> bytes:
 def pkcs7_unpad(data: bytes) -> bytes:
     """Strict PKCS#7 unpadding.
 
-    pyaes's PADDING_DEFAULT only checks that the final byte is <= 16, so
-    b'A'*15 + b'\\x00' silently decoded to b'' and the padding bytes themselves
-    were never compared. Validate properly instead: on a channel whose
+    pyaes's PADDING_DEFAULT only checks that the final byte is <= 16 and never
+    compares the padding bytes, so b'A'*15 + b'\\x00' decodes to b''. pyaes is
+    still the last-resort backend, so validate here instead: on a channel whose
     responses carry no MAC, silently truncating a response to nothing is a far
     worse failure mode than raising.
     """
