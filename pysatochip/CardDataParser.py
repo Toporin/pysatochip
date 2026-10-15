@@ -244,9 +244,9 @@ class CardDataParser:
                 authentikey= self.get_pubkey_from_signature(self.authentikey_coordx, msg2, signature2)
                 if ( authentikey.get_public_key_bytes(compressed=False) != self.authentikey.get_public_key_bytes(compressed=False) ):
                     raise ValueError("Recovered authentikey does not correspond to registered authentikey!")
-                logger.info("In parse_initiate_secure_channel: successfuly recovered authentikey:"+ authentikey.get_public_key_bytes(compressed=False).hex()) #debug
+                logger.debug("In parse_initiate_secure_channel: successfuly recovered authentikey:"+ authentikey.get_public_key_bytes(compressed=False).hex()) #debug
                     
-            logger.info("In parse_initiate_secure_channel: successfuly recovered pubkey:"+ self.pubkey.get_public_key_bytes(compressed=False).hex()) #debug
+            logger.debug("In parse_initiate_secure_channel: successfuly recovered pubkey:"+ self.pubkey.get_public_key_bytes(compressed=False).hex()) #debug
             return (self.pubkey)
     
     ##############

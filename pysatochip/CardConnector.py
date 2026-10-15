@@ -1227,7 +1227,7 @@ class CardConnector:
                 # performance rather than correctness -- and older applets may
                 # not implement ins 0x75 at all. Warn rather than fail the
                 # session, but do not pass it over in silence.
-                logger.warning(
+                logger.debug(
                     f"Could not cache the authentikey coordy on the card "
                     f"(error code {hex(256*sw1+sw2)}); continuing without it")
         return authentikey
@@ -1324,7 +1324,7 @@ class CardConnector:
         assert xtype in SUPPORTED_XTYPES
         
         # path is of the form 44'/0'/1'
-        logger.info(f"card_bip32_get_xpub(): path={str(path)}")#debugSatochip
+        logger.debug(f"card_bip32_get_xpub(): path={str(path)}")#debugSatochip
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
         else:
@@ -1347,7 +1347,7 @@ class CardConnector:
         xpub = bytes.fromhex(xpub_header) + bytes([depth]) + fingerprint + child_number + childchaincode + childkey.get_public_key_bytes(compressed=True)
         assert(len(xpub)==78)
         xpub= EncodeBase58Check(xpub)
-        logger.info(f"card_bip32_get_xpub(): xpub={str(xpub)}")#debugSatochip
+        logger.debug(f"card_bip32_get_xpub(): xpub={str(xpub)}")#debugSatochip
         return xpub
 
     def card_bip32_get_xprv(self, path, xtype, is_mainnet, sid=None):
@@ -1363,7 +1363,7 @@ class CardConnector:
         Returns: 
         xpriv (str): the corresponding xpriv value
         '''
-        logger.info(f"card_bip32_get_xpriv(): path={str(path)}")#debugSatochip
+        logger.debug(f"card_bip32_get_xpriv(): path={str(path)}")#debugSatochip
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
         else:
@@ -1390,7 +1390,7 @@ class CardConnector:
         return xprv
 
     def card_bip32_get_liquid_master_blinding_key(self):
-        logger.info("card_bip32_get_liquid_master_blinding_key");
+        logger.debug("card_bip32_get_liquid_master_blinding_key");
 
         cla = JCconstants.CardEdge_CLA
         ins = 0x7D
