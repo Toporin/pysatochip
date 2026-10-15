@@ -1220,13 +1220,12 @@ class CardConnector:
             apdu=[cla, ins, p1, p2, lc]+data
             (response, sw1, sw2) = self.card_transmit(apdu)
             if (sw1!=0x90 or sw2!=0x00):
-                # This command is only an optimization: it caches coordy on the
-                # chip so it does not have to recompute it later. The authentikey
-                # returned below was parsed (signature checked) from the caller's
+                # This command is only an optimization for older applet (version <= v0.10-0.3):
+                # it caches coordy on the chip so it does not have to recompute it later.
+                # The authentikey returned below was parsed (signature checked) from the caller's
                 # response, not from this command, so a rejection costs
-                # performance rather than correctness -- and older applets may
-                # not implement ins 0x75 at all. Warn rather than fail the
-                # session, but do not pass it over in silence.
+                # performance rather than correctness -- and new applets may
+                # not implement ins 0x75 at all.
                 logger.debug(
                     f"Could not cache the authentikey coordy on the card "
                     f"(error code {hex(256*sw1+sw2)}); continuing without it")
@@ -1295,8 +1294,10 @@ class CardConnector:
                     authcoordy= self.parser.authentikey.get_public_key_bytes(compressed=False)
                     authcoordy= list(authcoordy[33:])
                     data= response+[(len(coordy)>>8)&0xFF, len(coordy)&0xFF]+coordy
-                    apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]
-                    apdu_opt= apdu_opt+data
+                    apdu_opt= [cla, 0x74, 0x00, 0x00, len(data)]+data
+                    # This command is only an optimization for older applet (version <= v0.10-0.3):
+                    # it caches coordy on the chip so it does not have to recompute it later.
+                    # New applets do not implement ins 0x74 at all.
                     response_opt, sw1_opt, sw2_opt = self.card_transmit(apdu_opt)
 
                 (pubkey, chaincode)= self.parser.parse_bip32_get_extendedkey(response)
