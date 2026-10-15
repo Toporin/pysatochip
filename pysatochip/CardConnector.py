@@ -393,7 +393,9 @@ class CardConnector:
         self.parser.authentikey_from_storage=None
 
     def get_sw12(self, sw1, sw2):
-        return 16*sw1+sw2
+        # 16*sw1 would interleave the nibbles: (0x9C, 0x01) gave 0x9C1, not
+        # 0x9C01, so every comparison against a JCconstants SW_* value failed.
+        return 256*sw1+sw2
 
     def card_select(self):
         logger.debug("In card_select")
@@ -795,7 +797,7 @@ class CardConnector:
         elif sw1 == 0x6D and sw2 == 0x00:
             raise UnsupportedFeatureError()
         else:
-            raise UnexpectedSW12Error("Unexpected error", sw1, sw1)
+            raise UnexpectedSW12Error(f"Unexpected error (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
         return response, sw1, sw2
 
@@ -1051,7 +1053,12 @@ class CardConnector:
         elif (sw1==0x9C and sw2==0x0F):
             logger.error(f"Error during secret import: invalid parameter (0x9C0F)")
             raise CardError(f"Error during secret import: invalid parameter (0x9C0F)")
-        
+        elif (sw1!=0x90 or sw2!=0x00):
+            # never hand an error payload to the parser
+            logger.error(f"Error during trusted pubkey import: {hex(256*sw1+sw2)}")
+            raise UnexpectedSW12Error(
+                f"Unexpected error during trusted pubkey import (error code {hex(256*sw1+sw2)})", sw1, sw2)
+
         if self.parser.authentikey is None:
             self.parser.authentikey = self.card_export_authentikey()
 
@@ -1075,6 +1082,11 @@ class CardConnector:
             return 65*'00'
         if (sw1==0x6D and sw2==0x00): # instruction not supported
             return 65*'FF'
+        if (sw1!=0x90 or sw2!=0x00):
+            # never hand an error payload to the parser
+            logger.error(f"Error during trusted pubkey export: {hex(256*sw1+sw2)}")
+            raise UnexpectedSW12Error(
+                f"Unexpected error during trusted pubkey export (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
         if self.parser.authentikey is None:
             self.parser.authentikey = self.card_export_authentikey()
@@ -2252,6 +2264,13 @@ class CardConnector:
         elif sw1==0x9c and sw2==0x0c:
             msg = (f"Too many failed attempts! Your device has been blocked! \n\nYou need your PUK code to unblock it (error code {hex(256*sw1+sw2)})")
             raise PinBlockedError(msg)
+        else:
+            # Without this the method returned normally on any other status
+            # while self.pin still held the *old* value, so a caller that did
+            # not re-check sw1/sw2 believed the PIN had been changed.
+            logger.error(f"Error during PIN change: {hex(256*sw1+sw2)}")
+            raise UnexpectedSW12Error(
+                f"Unexpected error during PIN change (error code {hex(256*sw1+sw2)})", sw1, sw2)
 
         return (response, sw1, sw2)      
 

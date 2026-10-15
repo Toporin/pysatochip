@@ -28,6 +28,26 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Four defects that made a failure look like something else.
+
+`get_sw12()` returned `16*sw1+sw2`, interleaving the nibbles: `(0x9C, 0x01)` came out as
+`0x9C1` rather than `0x9C01`, so a comparison against any `JCconstants.SW_*` value could never
+match. It is public API; every other site in the file open-codes `256*sw1+sw2`, which is why
+this went unnoticed.
+
+`card_reset_factory_v3()` raised `UnexpectedSW12Error` with `sw1` passed twice, so callers
+inspecting `ex.sw2` saw a copy of `sw1`.
+
+`card_change_PIN()` had no catch-all branch. On any status other than success, wrong PIN or
+blocked PIN it returned normally while `self.pin` still held the old value, so a caller that
+did not re-check `sw1`/`sw2` believed the PIN had been changed. It now raises, and the cached
+PIN is left untouched.
+
+`card_import_trusted_pubkey()` and `card_export_trusted_pubkey()` handled a few specific
+statuses and then fell through to the parser with whatever the card had returned, without ever
+asserting `0x9000`. Both now reject an unexpected status before parsing; the documented
+special cases of the export command (`0x9C35` and `0x6D00`) are unchanged.
+
 Two APDU-construction bugs in `card_bip32_get_extendedkey()`.
 
 The coordy length was encoded as `[len & 0xFF00, len & 0x00FF]`, masking the high byte instead
