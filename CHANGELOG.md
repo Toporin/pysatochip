@@ -28,6 +28,13 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+The CLI now asks Click which command was invoked instead of reading `sys.argv[1]`. That is the
+first *argument*, not the command, so any global option in front of it was mistaken for the
+command: `satochip-cli --verbose util-generate-local-keypair` inferred no device filter and
+then opened the card and established a secure channel for a util- command that needs neither.
+`ctx.invoked_subcommand` is also resolved through `AliasedGroup`, so abbreviated command names
+now infer the device filter correctly as well.
+
 Two Satocash CLI bugs made it report, and act on, wrong proof data. Both were silent: the
 output looked plausible either way.
 

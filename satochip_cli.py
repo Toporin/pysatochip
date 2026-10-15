@@ -171,7 +171,8 @@ class AliasedGroup(click.Group):
 @click.command(cls=AliasedGroup)
 @click.option("--verbose", is_flag=True, help="Provide detailed logs")
 @click.option("--devicefilter", default=None, help="Filter only certain devices [satochip, seedkeeper, satodime]")
-def main(verbose, devicefilter):
+@click.pass_context
+def main(ctx, verbose, devicefilter):
 
     loglevel = logging.WARNING
     if verbose:
@@ -179,13 +180,20 @@ def main(verbose, devicefilter):
         logger.setLevel(loglevel)
         logger.debug("In main()")
 
+    # Ask Click which command was invoked instead of reading sys.argv[1]: that
+    # raised IndexError when run with no arguments at all, and saw the option
+    # rather than the command whenever one came first (`--verbose util-xyz`
+    # inferred nothing and then went on to open the card anyway). AliasedGroup
+    # resolves abbreviations to the full name, so this also works for those.
+    command_name = ctx.invoked_subcommand or ""
+
     # Unless devicefilter has been specified, infer it based off the command (if possible)
     if not devicefilter:
-        command_type = sys.argv[1].split("-")[0]
+        command_type = command_name.split("-")[0]
         if command_type in ["satochip", "seedkeeper", "satodime", "satocash"]:
             devicefilter = command_type
 
-    if "util-" not in sys.argv[1][:5]:
+    if not command_name.startswith("util-"):
         global cc
         # Connect to the card and get ready for a command
         cc = CardConnector(None, loglevel, devicefilter)
