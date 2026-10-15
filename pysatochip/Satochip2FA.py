@@ -90,8 +90,12 @@ class Satochip2FA:
             try:
                 reply = server.get(replyhash)
             except Exception as e:
+                # Do not `continue` here. That skipped both the sleep and the
+                # timeout decrement below, so an unreachable server produced an
+                # infinite full-speed retry: the 180 s timeout never fired and
+                # this call never returned. Fall through to the backoff instead.
                 logger.warning(f"Exception: cannot contact server - error: {str(e)}")
-                continue
+                reply = None
             if reply:
                 logger.info(f"Received response from {replyhash}")
                 logger.info(f"Response received: {reply}")
@@ -102,7 +106,7 @@ class Satochip2FA:
             time.sleep(period)
             timeout-=period
         
-        if reply is None:
+        if not reply:
             logger.warning(f"Error: Time-out without server reply...")
             d['reply_encrypt']= None #default 
     

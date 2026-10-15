@@ -480,9 +480,14 @@ class CardDataParser:
         # extract r
         lr= sigin[3]
         for i in range(32):
-            tmp= sigin[4+lr-1-i]
+            # Index only once the guard has passed. Reading sigin[4+lr-1-i]
+            # first walked backwards past the start of the buffer for i >= lr:
+            # Python wraps a negative index round to the end, so this quietly
+            # read unrelated bytes, and raised IndexError once it went past
+            # -len(sigin). The value was discarded in that branch, which is why
+            # it never showed up.
             if lr>=(i+1):
-                sigout[32-i]= tmp
+                sigout[32-i]= sigin[4+lr-1-i]
             else:
                 sigout[32-i]=0
         # extract s
@@ -493,9 +498,9 @@ class CardDataParser:
         if lt != (lr+ls+4):
             raise ValueError("Wrong lt value")
         for i in range(32):
-            tmp= sigin[5+lr+ls-i]
+            # same ordering problem as the r loop above
             if ls>=(i+1):
-                sigout[64-i]= tmp
+                sigout[64-i]= sigin[5+lr+ls-i]
             else:
                 sigout[64-i]=0
         # 1 byte header

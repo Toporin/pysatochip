@@ -28,6 +28,26 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Three remaining correctness bugs.
+
+`card_bip32_get_xpub()` and `card_bip32_get_xprv()` document `path` as `str | bytes`, but only
+the `str` branch bound `depth` and `bytepath`, so passing bytes raised `UnboundLocalError` on
+the very next line. A bytes path now derives the same values directly, and a `bytearray` or a
+list of ints works too.
+
+`Satochip2FA.do_challenge_response()` used `continue` in its exception handler, which skipped
+both the `time.sleep(period)` and the `timeout -= period` below it. An unreachable 2FA server
+therefore produced an infinite full-speed retry: the 180 second timeout never fired and the
+call never returned, hanging the signing flow. It now falls through to the backoff, so the
+timeout works. An empty (falsy but not `None`) reply also used to leave `reply_encrypt` unset,
+raising `KeyError` in the caller; the key is now always set.
+
+`parse_to_compact_sig()` read `sigin[4+lr-1-i]` *before* checking `lr >= (i+1)`. For `i >= lr`
+the index went negative and Python wrapped it round to the end of the buffer, so it quietly
+read unrelated bytes and would raise `IndexError` once it passed `-len(sigin)`. The value was
+discarded in that branch, which is why it never surfaced. Both the r and s loops now index only
+once the guard has passed.
+
 Four defects that made a failure look like something else.
 
 `get_sw12()` returned `16*sw1+sw2`, interleaving the nibbles: `(0x9C, 0x01)` came out as

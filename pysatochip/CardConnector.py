@@ -1313,7 +1313,15 @@ class CardConnector:
         logger.info(f"card_bip32_get_xpub(): path={str(path)}")#debugSatochip
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
-        
+        else:
+            # The docstring documents `str | bytes`, but only the str branch used
+            # to bind `depth` and `bytepath`, so a bytes path raised
+            # UnboundLocalError on the next line. bip32path2bytes() packs 4 bytes
+            # per level, so depth is simply the length over 4. bytes() also
+            # accepts a bytearray or a list of ints.
+            bytepath= bytes(path)
+            depth= len(bytepath)//4
+
         (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath, sid)
         if depth == 0: #masterkey
             fingerprint= bytes([0,0,0,0])
@@ -1346,7 +1354,15 @@ class CardConnector:
         logger.info(f"card_bip32_get_xpriv(): path={str(path)}")#debugSatochip
         if (type(path)==str):
             (depth, bytepath)= self.parser.bip32path2bytes(path)
-        
+        else:
+            # The docstring documents `str | bytes`, but only the str branch used
+            # to bind `depth` and `bytepath`, so a bytes path raised
+            # UnboundLocalError on the next line. bip32path2bytes() packs 4 bytes
+            # per level, so depth is simply the length over 4. bytes() also
+            # accepts a bytearray or a list of ints.
+            bytepath= bytes(path)
+            depth= len(bytepath)//4
+
         option_flags= 0x02 # request privkey
         (childkey, childchaincode)= self.card_bip32_get_extendedkey(bytepath, sid, option_flags)
         if depth == 0: #masterkey
