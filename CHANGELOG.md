@@ -7,289 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.18.5]:
 
-Security: do not leak secrets through logs or stdout; harden the secure-channel AES
+**Security: stop leaking secrets through logs and stdout; harden secure-channel AES**
 
-Three paths could expose key material on the host, independently of the card.
+### Security
+- **Secrets no longer printed or logged.** Removed 12 `print()` calls, including the one in `satochip_import_privkey()` that dumped the raw private key. The xprv is no longer logged in `card_bip32_get_xpub()`, and the CLI no longer logs SeedKeeper masterseeds or mnemonics.
+- **APDU logging uses an allow-list (`_LOGGABLE_INS`)** for both commands and responses. Bodies of unlisted instructions are masked. Previously, `INS_IMPORT_KEY`, SeedKeeper import/export and all decrypted responses were logged in full at DEBUG.
+- **Secure channel checks the status word before parsing.** A card returning `0x6D00` with a rogue ephemeral key could previously establish a usable channel. `self.sc` now stays `None` on failure.
+- **Card-returned key material is now signature-checked.** This applies to `card_bip32_get_liquid_master_blinding_key()` and `satocash_get_bip32_extendedkey()`, where the pubkey is also checked to be on the curve. INS 0x6D is not yet implemented by any Satocash applet, so the latter is untested on hardware.
+- **SeedKeeper:**
+  - A fingerprint mismatch on import or export now raises `SeedKeeperError` instead of only logging. The import error names the stored id.
+  - Whether the signature is verified now depends on `is_secure_export`, not the card-chosen `sign_size`. A card can no longer skip verification by returning 20 bytes.
+  - `seedkeeper_derive_master_password()` always verifies and raises on failure. It also now initialises its authentikey.
+- **`get_trusted_pubkey()` fails closed.** A missing authentikey, an empty signature or a failed verification now raises `ValueError`. Previously the key was returned unverified.
+- **AES backend:** the secure channel now uses `cryptography`, then `pycryptodomex`, and falls back to `pyaes` with a warning. This avoids `pyaes`'s key-dependent table lookups. The wire format is unchanged. PKCS#7 padding, IV and ciphertext lengths are now validated and raise `SecureChannelError`.
 
-`satochip_import_privkey()` ended with a `print()` of the command APDU, which embeds the raw
-32-byte private key; being a `print()` rather than a log call, no log level suppressed it.
-Eleven further `print()` calls in the MuSig2 and Satocash paths dumped nonces, the encrypted
-secnonce and signatures. All twelve are removed, and the status words are logged at DEBUG.
+### Fixes
+- `base_encode(base=43)` raised `NameError`. The alphabet is now defined, matching Electrum.
+- `card_bip32_get_xpub()`/`get_xprv()` now accept bytes, `bytearray` or a list of ints as `path`.
+- `Satochip2FA.do_challenge_response()` retried forever at full speed when the server was unreachable. The backoff and timeout now work, and `reply_encrypt` is always set.
+- `parse_to_compact_sig()` no longer reads at negative indices.
+- `get_sw12()` returned `16*sw1+sw2` instead of `256*sw1+sw2`.
+- `card_reset_factory_v3()` passed `sw1` twice to `UnexpectedSW12Error`.
+- `card_change_PIN()` now raises on any unexpected status.
+- `card_import/export_trusted_pubkey()` now reject unexpected statuses before parsing.
+- `card_bip32_get_extendedkey()` had two bugs. The coordy length masked the high byte instead of shifting it. The out-of-memory retry toggled the erase flag instead of setting it. A dead `while True` loop was also removed.
+- `satocash_get_status()` now writes `needsPIN` instead of overwriting `is_seeded`.
+- `satodime_set_unlock_secret()` now only claims ownership when a secret is set.
+- `satodime_get_pubkey()` checks the status word before parsing.
+- `card_bip32_set_authentikey_pubkey()` logs a warning on failure.
+- **CLI:**
+  - The command is now detected with `ctx.invoked_subcommand` instead of `sys.argv[1]`. Global options and abbreviated names now work.
+  - A shared-`set()` bug made `satocash-export-tokenv4` select proofs from other mints.
+  - `satocash-get-proof-info` decoded proof state with XOR instead of a mask.
+  - Commands calling other commands exited the process early. `common-initial-setup --label` exited at the label step, and `satodime-ownership-claim` never worked.
 
-The BIP32 extended *private* key was logged at INFO by `card_bip32_get_xpub()`, and the CLI
-logged the masterseed/mnemonic blob from a SeedKeeper export at INFO. Both are removed.
+### Minor
+Normalise all text files to LF. Whitespace only: this commit changes no content. 
+9 of 68 tracked files were not pure LF. .gitattributes now makes this a property of the repository rather than of each
+contributor's core.autocrlf, which is invisible and does not fix anything retroactively.
 
-APDU logging masked the body of a fixed list of instructions and logged everything else in
-full. That list omitted `INS_IMPORT_KEY` and the SeedKeeper import/export instructions,
-existed in two diverged copies, and covered only the command direction, so decrypted responses
-carrying exported masterseeds, Satodime private keys or `xprv` were logged verbatim at DEBUG.
-Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by an allow-list,
-`_LOGGABLE_INS`: the body is rendered only for instructions known to carry no secret, and
-anything else, including an unclassified instruction, shows the 5-byte header with the body
-masked.
+### Changes
+- **`card_parse_transaction()` is deprecated** and now returns `sha256d(transaction)` directly. The return contract is unchanged. `TxParser`, which could hang at 100% CPU on malformed input, is removed, along with the dead `parse_parse_transaction()`. New code should use `util.sha256d()` with `card_sign_transaction_hash()`.
+- **Logging belongs to the application.** The package installs a `NullHandler` and exposes `set_log_level()`. `loglevel` constructor arguments default to `None` and no longer override the host's configuration.
+- `python_requires >= 3.9`. A nested-quote f-string that broke the CLI below 3.12 is fixed. The minimum `cryptography` version is now 42.0.0.
 
-`base_encode(v, base=43)` referenced an undefined `__b43chars`, so base 43 -- which the
-function's own guard advertises as supported -- raised `NameError` unconditionally. The
-alphabet is now defined, with the same ordering as in Electrum, which this helper was ported
-from.
-
-Three remaining correctness bugs.
-
-`card_bip32_get_xpub()` and `card_bip32_get_xprv()` document `path` as `str | bytes`, but only
-the `str` branch bound `depth` and `bytepath`, so passing bytes raised `UnboundLocalError` on
-the very next line. A bytes path now derives the same values directly, and a `bytearray` or a
-list of ints works too.
-
-`Satochip2FA.do_challenge_response()` used `continue` in its exception handler, which skipped
-both the `time.sleep(period)` and the `timeout -= period` below it. An unreachable 2FA server
-therefore produced an infinite full-speed retry: the 180 second timeout never fired and the
-call never returned, hanging the signing flow. It now falls through to the backoff, so the
-timeout works. An empty (falsy but not `None`) reply also used to leave `reply_encrypt` unset,
-raising `KeyError` in the caller; the key is now always set.
-
-`parse_to_compact_sig()` read `sigin[4+lr-1-i]` *before* checking `lr >= (i+1)`. For `i >= lr`
-the index went negative and Python wrapped it round to the end of the buffer, so it quietly
-read unrelated bytes and would raise `IndexError` once it passed `-len(sigin)`. The value was
-discarded in that branch, which is why it never surfaced. Both the r and s loops now index only
-once the guard has passed.
-
-Four defects that made a failure look like something else.
-
-`get_sw12()` returned `16*sw1+sw2`, interleaving the nibbles: `(0x9C, 0x01)` came out as
-`0x9C1` rather than `0x9C01`, so a comparison against any `JCconstants.SW_*` value could never
-match. It is public API; every other site in the file open-codes `256*sw1+sw2`, which is why
-this went unnoticed.
-
-`card_reset_factory_v3()` raised `UnexpectedSW12Error` with `sw1` passed twice, so callers
-inspecting `ex.sw2` saw a copy of `sw1`.
-
-`card_change_PIN()` had no catch-all branch. On any status other than success, wrong PIN or
-blocked PIN it returned normally while `self.pin` still held the old value, so a caller that
-did not re-check `sw1`/`sw2` believed the PIN had been changed. It now raises, and the cached
-PIN is left untouched.
-
-`card_import_trusted_pubkey()` and `card_export_trusted_pubkey()` handled a few specific
-statuses and then fell through to the parser with whatever the card had returned, without ever
-asserting `0x9000`. Both now reject an unexpected status before parsing; the documented
-special cases of the export command (`0x9C35` and `0x6D00`) are unchanged.
-
-Two APDU-construction bugs in `card_bip32_get_extendedkey()`.
-
-The coordy length was encoded as `[len & 0xFF00, len & 0x00FF]`, masking the high byte instead
-of shifting it, so any length of 256 or more would put a value above 255 into a byte list. It
-is harmless today only because coordy is always 32 bytes; it now shifts, at both of the two
-places that built this field.
-
-The out-of-memory retry did `apdu[3] = apdu[3] ^ 0x80`, which *toggles* the erase flag rather
-than setting it: a caller that had already set bit 7 had it cleared instead, so the retry asked
-the card not to erase. The following `apdu[3] &= 0x7f` then cleared bit 7 unconditionally,
-discarding a flag the caller had explicitly passed. The retry now sets the flag and restores
-the caller's original value.
-
-The `while (True)` wrapping that exchange has also been removed: every branch inside it returns
-or raises, so it never looped.
-
-Two pieces of card state were recorded in the wrong place.
-
-`satocash_get_status()` wrote the Satocash "PIN required" flag into `self.is_seeded`, the
-Satochip "a BIP32 seed is loaded" flag, so reading the status of a Satocash clobbered an
-unrelated piece of state with it. `CardConnector.__init__` already declares `self.needsPIN`
-for this, and that is where it now goes.
-
-`satodime_set_unlock_secret()` set `self.is_owner = False` when called with no secret and then
-immediately overwrote it with an unconditional `self.is_owner = True`. A client that had no
-unlock secret therefore believed it was the owner of the Satodime while every unlock code it
-computed was keyed with the all-zero placeholder. Ownership now follows the secret, and is
-dropped again if the secret is cleared.
-
-The CLI now asks Click which command was invoked instead of reading `sys.argv[1]`. That is the
-first *argument*, not the command, so any global option in front of it was mistaken for the
-command: `satochip-cli --verbose util-generate-local-keypair` inferred no device filter and
-then opened the card and established a secure channel for a util- command that needs neither.
-`ctx.invoked_subcommand` is also resolved through `AliasedGroup`, so abbreviated command names
-now infer the device filter correctly as well.
-
-Two Satocash CLI bugs made it report, and act on, wrong proof data. Both were silent: the
-output looked plausible either way.
-
-`keyset_indexes_by_mint = max_nb_mints * [set()]` put the *same* set object at every index, so
-adding a keyset to one mint added it to all of them. That list is handed to
-`satocash_export_keysets()`, so `satocash-export-tokenv4` selected proofs belonging to other
-mints. The neighbouring `max_nb_mints * [0]` lines are fine only because integers are immutable
-and `+=` rebinds rather than mutates, which is what makes the bug easy to miss. Both set lists
-are now built with a comprehension.
-
-`satocash-get-proof-info` decoded the proof state with `value ^ 0x03` while the comment on the
-same line said "MASK 0x03". XOR reported unspent proofs as spent and spent ones as unspent, and
-turned every P2PK-flagged proof and every empty slot into "UNKNOWN". It now masks, as the
-adjacent `value & 0x80` check already did.
-
-Three CLI commands were invoking other commands as if they were plain functions.
-`@main.command()` binds the name to a `click.Command`, so calling it runs Click's standalone
-`main()`: it re-parses `sys.argv`, re-prompts for the PIN and then exits the process.
-`common-initial-setup --label X` therefore exited at the point where it set the label, and
-`satodime-ownership-claim` passed `--satodime`, which `common_initial_setup` does not accept,
-so Click aborted with a usage error before anything ran -- that command never worked. The
-shared bodies are now plain `set_card_label()` and `initial_setup()` helpers that both the
-commands and the internal callers use; the commands themselves and their options are unchanged.
-
-Key material returned by the card is now signature-checked.
-`card_bip32_get_liquid_master_blinding_key()` parsed the signature and then left a
-`# todo verify signature` where the check belonged, returning the SLIP-77 master blinding key
-unverified -- a hostile or swapped card chose the blinding key for every confidential Liquid
-address derived from it. `satocash_get_bip32_extendedkey()` had the same `# todo` and
-additionally rebuilt the compressed pubkey from the card's claimed uncompressed point without
-checking it is on the curve, so only the x coordinate survived and a bad y went unnoticed.
-
-The signed message was taken from the applet sources rather than inferred: both applets sign
-everything written before the signature's own length field. For the blinding key that is
-`[keySize(2b) | blindingKey]`; for the Satocash response the authentikey signature covers the
-counter, the pubkey and the preceding self-signature, the same construction the secure-channel
-handshake already uses. Both commands now reject a missing signature and verify against the
-authentikey, and the Satocash pubkey is validated as an on-curve point before being compressed.
-
-Note that INS 0x6D is not implemented by any released Satocash applet, so
-`satocash_get_bip32_extendedkey()` could not be exercised against hardware; its layout follows
-the convention used everywhere else in both applets and should be confirmed on a card once the
-applet implements the command.
-
-Responses are no longer parsed before their status word is checked.
-`card_initiate_secure_channel()` discarded `sw1`/`sw2` and handed the body straight to the
-parser; on an error status that body is an error payload or empty, and on a body shaped like a
-valid answer the session key was derived from it. With a card returning `0x6D00` and a
-self-signed rogue ephemeral key in the body, the pre-0.18.5 code established a fully usable
-secure channel keyed to that rogue key. It now raises `UnexpectedSW12Error` before parsing, and
-`self.sc` stays `None` so no later command can use a half-built channel.
-
-`satodime_get_pubkey()` had the same shape and now returns `(response, sw1, sw2, [], [])`
-without parsing, matching `satodime_seal_key()`, `satodime_unseal_key()` and
-`satodime_get_privkey()` -- it was the only one of the four missing the check. The five-value
-tuple is kept, since the CLI unpacks it directly.
-
-`card_bip32_set_authentikey_pubkey()` never looked at its result at all. That command only
-caches the authentikey coordy on the chip as an optimization, and the authentikey it returns
-was parsed and signature-checked from the caller's response rather than from this command, so a
-failure costs performance rather than correctness -- and older applets may not implement ins
-0x75. It now logs a warning instead of passing the failure over in silence, and deliberately
-does not raise.
-
-A SeedKeeper fingerprint mismatch is now an error. The card stores
-`sha256(secret)[0:8]` beside each secret for exactly one purpose: to detect that the bytes on
-the card are not the bytes that were meant to be there. Both `seedkeeper_import_secret()` and
-`seedkeeper_export_secret()` compared it and only wrote `logger.error()` on mismatch, then
-returned normally -- so a masterseed the card had stored incorrectly, or an export corrupted
-or tampered with in transit, reached the caller looking exactly like a good one. For a seed
-that means funds derived from it are unrecoverable.
-
-Both now raise `SeedKeeperError`. The import error names the id the suspect secret was stored
-under, since the import has already happened and the caller needs to be able to delete it. The
-export check remains limited to plain exports: a secure export returns the secret encrypted to
-the destination device, so the host cannot recompute the digest.
-
-SeedKeeper export signatures are no longer skippable by the card. `seedkeeper_export_secret()`
-and `seedkeeper_derive_master_password()` chose whether to verify the response signature based
-on `sign_size`, a length the card chooses. A 20-byte value is legitimate -- but only for a
-*secure* export, where it is an hmac keyed with the secret shared with the destination device,
-which only that device can check. For a plain export the card must sign with its authentikey,
-so a card that simply returned 20 bytes bypassed verification and the host stored the result as
-a trusted secret. The branch now follows `is_secure_export`, which the host decides: a plain
-export must carry a verifiable authentikey signature, and a secure export must carry exactly 20
-bytes, any other length raising `SeedKeeperError`.
-
-`seedkeeper_derive_master_password()` additionally caught a failed verification, put the
-message in `dic['error_msg']` and returned the derived master password anyway, so a caller that
-did not inspect that extra key accepted an unverified result. It now always verifies -- secure
-export is unsupported there, so the hmac branch was unreachable in a legitimate flow -- and
-lets the failure propagate. Because the failure had always been swallowed, it had also gone
-unnoticed that the function never initialised the authentikey it verifies against; it now does,
-like `seedkeeper_export_secret()`.
-
-Callers that relied on `dic['error_msg']` to detect a bad signature should catch the exception
-instead. Genuine signatures, and genuine 20-byte hmacs on secure exports, behave exactly as
-before.
-
-`get_trusted_pubkey()` now fails closed. It verified that the card had signed the trusted
-pubkey with its authentikey, then caught the failure, logged it and returned the key anyway.
-That signature is the only thing binding the key to the card, and the trusted pubkey is what a
-secure SeedKeeper -> Satochip import encrypts a secret to, so anything able to alter the card
-response could substitute its own key and receive the exported seed -- while
-`card_import_trusted_pubkey()` reported success to the user. Two further ways to skip the
-check existed in the same function: a card-chosen `sig_size` of 0 made verification raise
-`IndexError`, caught by the same handler, and an unset authentikey raised `AttributeError`
-from the debug line before any check ran.
-
-A missing authentikey and an empty signature are now rejected up front, matching the
-`raise ValueError("Signature missing")` pattern the other parsers already use, and a failed
-verification is re-raised as a `ValueError` chained to the original cause. Both call sites in
-the CLI already wrap the call, so this surfaces as an error message instead of a bogus pubkey.
-Callers that previously ignored the return value's trustworthiness will now see an exception
-where they used to silently receive an unverified key.
-
-`card_parse_transaction()` is deprecated, and `TxParser` is removed. The function kept a
-whole Bitcoin transaction parser alive to produce a value that never depended on the parse:
-`TxParser` only accumulated the bytes it walked over, so `get_tx_double_hash()` was always the
-plain double-sha256 of its input, on both the legacy and the segwit code path. That was
-verified over 500 generated transactions -- multi-input, multi-output, and with scripts
-straddling the parser's 128-byte chunk size and the 0xfd varint boundary -- before the parser
-was deleted.
-
-It now computes `sha256d(transaction)` directly. `is_segwit` is accepted and ignored, since it
-only ever selected a parsing path. The signature and the `(response, sw1, sw2, tx_hash,
-needs_2fa)` return contract are unchanged, so existing callers such as Electrum keep working;
-the function emits a `DeprecationWarning` and the docstring states that it does not parse its
-input. New code should call `pysatochip.util.sha256d()` and
-`card_sign_transaction_hash()` instead.
-
-Dropping the parser also removes a denial of service. `TxParser.parse_byte()` sliced without
-bounds checks, and Python slicing does not raise on over-read, so a truncated or malformed
-transaction drove its remaining-byte counter negative and `is_parsed()` never became true
-again; the caller was an unguarded `while not txparser.is_parsed()` spin loop. A corrupt or
-hostile transaction could therefore wedge the process at 100% CPU. The parser also called an
-undefined `read_int32()` for any varint in the 0xFE form, raising `NameError` on transactions
-with scripts of 65536 bytes or more. Hashing cannot fail that way, and the new tests cover
-empty, truncated and arbitrary input. `CardDataParser.parse_parse_transaction()`, dead since
-the ins 0x71 ParseTransaction command was removed in applet v0.16-0.0, is deleted too.
-
-Logging configuration now belongs to the application. The library called
-`logger.setLevel()` and `logging.basicConfig()` at import time, and every constructor applied
-its `loglevel` argument to the *module* logger with a default of WARNING, so merely
-constructing an object overrode whatever the host application had configured, and a second
-instance retroactively changed the first. The level was also relayed by three different
-mechanisms and never reached `certificate_validator`, `ec_backend`, `aes_backend` or
-`TxParser`, so `--verbose` skipped them.
-
-`pysatochip/__init__.py` now installs a `NullHandler` on the package logger and exposes
-`set_log_level(level)`, which sets the level once on the `pysatochip` logger and cascades to
-every submodule; module loggers stay at NOTSET so nothing blocks the cascade. The `loglevel`
-constructor arguments keep their name, position and meaning, but default to `None` (leave the
-application's configuration alone) and, when given, simply call `set_log_level()`.
-
-Two observable changes for existing applications. An application that configures no logging at
-all no longer sees pysatochip warnings on stderr, because the `NullHandler` replaces
-`logging.lastResort`; in practice the library signals failure by raising far more than by
-logging. And an application whose root logger is at DEBUG, but which never passed `loglevel`,
-now gets pysatochip debug output where the library previously forced itself to WARNING;
-`logging.getLogger('pysatochip').setLevel(logging.WARNING)` restores the old volume.
-
-The secure channel no longer uses `pyaes` by default: its table-driven AES makes memory access
-key-dependent, the same class of side channel that led to the removal of the `ecdsa` package
-in v0.18.0 (CVE-2024-23342), here applied to the session key. The new `aes_backend` module
-selects `cryptography`, then `pycryptodomex` (both already dependencies), keeping `pyaes` as a
-last resort for embedded builds that ship neither. The wire format is unchanged -- AES-128-CBC
-with PKCS#7, same key and IV construction -- and a vector captured from the previous `pyaes`
-output pins it. Unlike `ec_backend` this does not fail closed when only `pyaes` is available,
-since the secure channel is mandatory from applet v0.11; it logs a warning instead.
-
-PKCS#7 unpadding is now validated: `pyaes` only checked that the final byte was at most 16 and
-never compared the padding bytes, so a response ending in `0x00` decoded to an empty plaintext.
-Malformed padding, IV length or ciphertext length now raise `SecureChannelError`, which moves
-to a single definition in `SecureChannel.py` and stays re-exported from `CardConnector`.
-
-`python_requires` moves from 3.6 to 3.9, which the code already required: a PEP 701
-nested-quote f-string in the CLI was a `SyntaxError` below 3.12, breaking the `satochip-cli`
-entry point rather than just that command, and `list[int]` annotations need 3.9. The f-string
-is fixed. The `cryptography` minimum moves to 42.0.0, as it is the default backend for every
-private-key operation and the 3.3.2 floor admitted releases with known CVEs.
+### Upgrade notes
+- **Several silent failures now raise:** SeedKeeper fingerprint and signature checks, `get_trusted_pubkey()`, `card_change_PIN()`, trusted-pubkey import/export and secure-channel setup. Callers checking `dic['error_msg']` should catch the exception instead.
+- **Logging output changes:**
+  - Applications without logging configured no longer see pysatochip warnings on stderr.
+  - Applications whose root logger is at DEBUG now get pysatochip debug output.
+  - To restore the old behaviour, call `logging.getLogger('pysatochip').setLevel(logging.WARNING)`.
 
 ## [0.18.4]:
 
