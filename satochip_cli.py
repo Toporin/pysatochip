@@ -277,10 +277,13 @@ def common_get_card_label():
     except Exception as e:
         print(e)
 
-@main.command()
-@click.option("--label", default="", help="Device Label.")
-def common_set_card_label(label):
-    """Sets a plain text label for the card (Optional)"""
+def set_card_label(label):
+    """Set a plain text label on the card.
+
+    Plain function on purpose: common_initial_setup() needs to reuse this, and
+    calling the click.Command below would run Click's standalone main(), which
+    re-parses argv, re-prompts for the PIN and then sys.exit()s.
+    """
     try:
         if cc.card_type != "Satodime":
             # TODO: for satodime, may fail if performed via NFC (needs ownership)
@@ -298,6 +301,13 @@ def common_set_card_label(label):
             print("Device Label Updated")
     except Exception as e:
         print(e)
+
+
+@main.command()
+@click.option("--label", default="", help="Device Label.")
+def common_set_card_label(label):
+    """Sets a plain text label for the card (Optional)"""
+    set_card_label(label)
 
 @main.command()
 def common_get_card_ndef():
@@ -456,10 +466,13 @@ def common_set_feature_policy(feature_id, feature_policy):
     except Exception as e:
         print(e)
 
-@main.command()
-@click.option("--label", default="", help="Card Label")
-def common_initial_setup(label):
-    """Run the initial card setup process"""
+def initial_setup(label=""):
+    """Run the initial card setup process.
+
+    Plain function on purpose, for the same reason as set_card_label():
+    satodime_ownership_claim() reuses it, and invoking the click.Command would
+    re-enter Click's argument parsing and exit the process.
+    """
 
     if cc.card_type == "Satodime":
         pin_0 = list("1234".encode('utf8')) # This isn't actually used in Satodime, so can be anything
@@ -510,7 +523,14 @@ def common_initial_setup(label):
         print()
 
     if len(label) > 0:
-        common_set_card_label(["--label", label])
+        set_card_label(label)
+
+
+@main.command()
+@click.option("--label", default="", help="Card Label")
+def common_initial_setup(label):
+    """Run the initial card setup process"""
+    initial_setup(label)
 
 """##############################
 #        COMMON PIN MGMT        #        
@@ -2343,7 +2363,10 @@ def satodime_ownership_transfer(unlock_secret, unlock_counter):
 @main.command()
 def satodime_ownership_claim():
     """Claim Ownership"""
-    common_initial_setup(["--satodime"])
+    # initial_setup() already branches on cc.card_type == "Satodime"; the old
+    # ["--satodime"] argument was not an option of the command and made Click
+    # abort with a UsageError before anything ran.
+    initial_setup()
 
 @main.command()
 @click.option("--slot", default=0, help="Get the status of a specific keyslot")

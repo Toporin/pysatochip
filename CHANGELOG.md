@@ -28,6 +28,15 @@ Both directions now use one `_redact_apdu()`/`_redact_response()` pair driven by
 anything else, including an unclassified instruction, shows the 5-byte header with the body
 masked.
 
+Three CLI commands were invoking other commands as if they were plain functions.
+`@main.command()` binds the name to a `click.Command`, so calling it runs Click's standalone
+`main()`: it re-parses `sys.argv`, re-prompts for the PIN and then exits the process.
+`common-initial-setup --label X` therefore exited at the point where it set the label, and
+`satodime-ownership-claim` passed `--satodime`, which `common_initial_setup` does not accept,
+so Click aborted with a usage error before anything ran -- that command never worked. The
+shared bodies are now plain `set_card_label()` and `initial_setup()` helpers that both the
+commands and the internal callers use; the commands themselves and their options are unchanged.
+
 Key material returned by the card is now signature-checked.
 `card_bip32_get_liquid_master_blinding_key()` parsed the signature and then left a
 `# todo verify signature` where the check belonged, returning the SLIP-77 master blinding key
