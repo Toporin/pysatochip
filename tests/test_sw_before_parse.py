@@ -8,6 +8,7 @@ card_initiate_secure_channel(), which would derive the session key from
 whatever came back.
 """
 
+import logging
 import os
 import sys
 import unittest
@@ -104,8 +105,10 @@ class SatodimeGetPubkeyTestCase(unittest.TestCase):
 
 class SetAuthentikeyPubkeyTestCase(unittest.TestCase):
     """This one is an optimization: the authentikey it returns comes from the
-    caller's already-verified response, not from the 0x75 command, and older
-    applets may not implement 0x75 at all. It must warn, not raise."""
+    caller's already-verified response, not from the 0x75 command, and newer
+    applets may not implement 0x75 at all. A rejection must be logged and
+    stepped over, not raised -- and since it is the expected outcome on those
+    applets, it is logged at DEBUG so it does not spam every session."""
 
     def setUp(self):
         self.cc = CardConnector.__new__(CardConnector)
@@ -123,10 +126,11 @@ class SetAuthentikeyPubkeyTestCase(unittest.TestCase):
 
     def test_returns_the_authentikey_even_if_caching_fails(self):
         self.sw = (0x6D, 0x00)
-        with self.assertLogs('pysatochip.CardConnector', level='WARNING') as logs:
+        with self.assertLogs('pysatochip.CardConnector', level='DEBUG') as logs:
             result = self.cc.card_bip32_set_authentikey_pubkey([0x00] * 70)
         self.assertIs(result, self.fake_key)
         self.assertTrue(any('coordy' in m for m in logs.output))
+        self.assertTrue(all(r.levelno < logging.WARNING for r in logs.records))
 
     def test_success_path_is_silent(self):
         self.sw = (0x90, 0x00)

@@ -4,3 +4,9 @@ include README.md CHANGELOG.md LICENSE
 include requirements.txt
 # the CLI source of truth; setup.py copies it into the package at build time
 include satochip_cli.py
+
+# Keep the sdist source-only: the graft above would otherwise sweep in the
+# build machine's compiled bytecode (including .pyc files whose .py is gone).
+global-exclude *.py[cod]
+global-exclude .DS_Store
+prune **/__pycache__

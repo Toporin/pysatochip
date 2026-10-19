@@ -76,8 +76,14 @@ There is no `pyproject.toml`; packaging is setuptools-based:
 - Install from source: `pip install .` / `pip install -e ".[CLI]"`, or legacy
   `python setup.py install`.
 - Distribution: `python -m build` (or `setup.py sdist bdist_wheel`) produces wheel + sdist
-  in `dist/`; published to PyPI. `MANIFEST.in` grafts the package and includes
-  README/CHANGELOG/LICENSE/requirements.
+  in `dist/`; published to PyPI. `MANIFEST.in` grafts the package, includes
+  README/CHANGELOG/LICENSE/requirements plus the root `satochip_cli.py`, and excludes
+  `*.py[cod]` and `__pycache__` so the sdist stays source-only — the graft would otherwise
+  sweep in the build machine's bytecode (git ignores do not apply to `MANIFEST.in`).
+- Wipe `build/` and `pysatochip.egg-info/` before a release build: `SOURCES.txt` caches the
+  previous file list, so a stale entry survives even after `MANIFEST.in` or the tree changes.
+  Verify with `tar tzf dist/pysatochip-<version>.tar.gz | grep -E '__pycache__|\.py[cod]$'`
+  (must be empty) and `twine check dist/pysatochip-<version>*`.
 - The console entry point is `satochip-cli=pysatochip.satochip_cli:main`; from a checkout
   you can also run `python satochip_cli.py`.
 - Running anything against a real card needs the PC/SC daemon (`pcscd` on Linux) and pyscard
