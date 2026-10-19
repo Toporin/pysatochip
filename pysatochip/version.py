@@ -79,7 +79,10 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 #          logging is now deny-by-default. Secure-channel AES moved off pure-python
 #          pyaes onto cryptography/pycryptodomex; wire format unchanged. Minimum
 #          Python is now 3.9, which the code already required.
+# v0.18.6: fix: include the repo-root CLI source file in the sdist. Building from
+#          the sdist (e.g. pip install --no-binary) crashed in setup.py with
+#          FileNotFoundError: satochip_cli.py.
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 5
+PYSATOCHIP_REVISION= 6
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

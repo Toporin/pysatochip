@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.6]:
+
+**Packaging: ship the CLI source file in the sdist**
+
+### Fixes
+- The repo-root `satochip_cli.py` — the CLI's single source of truth, which `setup.py` copies into the package at build time to back the `satochip-cli` console script — was not included in the sdist. Building pysatochip from the sdist (e.g. `pip install --no-binary :all:`, as done by deterministic binary builds) therefore crashed in `setup.py` with `FileNotFoundError: 'satochip_cli.py'`. The file is now shipped via `MANIFEST.in`; the build-time copy mechanism, the console entry point and the CLI itself are unchanged.
+
 ## [0.18.5]:
 
 **Security: stop leaking secrets through logs and stdout; harden secure-channel AES**

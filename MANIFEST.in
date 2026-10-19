@@ -1,4 +1,6 @@
 graft pysatochip
 
-include README.md CHANGELOG.md LICENSE 
+include README.md CHANGELOG.md LICENSE
 include requirements.txt
+# the CLI source of truth; setup.py copies it into the package at build time
+include satochip_cli.py
