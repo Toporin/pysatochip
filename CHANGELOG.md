@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.18.6]:
 
-**Packaging: ship the CLI source file in the sdist**
+**Packaging: fix the contents of the source distribution**
 
 ### Fixes
 - The repo-root `satochip_cli.py` — the CLI's single source of truth, which `setup.py` copies into the package at build time to back the `satochip-cli` console script — was not included in the sdist. Building pysatochip from the sdist (e.g. `pip install --no-binary :all:`, as done by deterministic binary builds) therefore crashed in `setup.py` with `FileNotFoundError: 'satochip_cli.py'`. The file is now shipped via `MANIFEST.in`; the build-time copy mechanism, the console entry point and the CLI itself are unchanged.
+- The sdist also carried the build machine's compiled bytecode: `graft pysatochip` in `MANIFEST.in` swept the whole package directory, `__pycache__/` included, so every release since 0.17.0 shipped ~500 KB of CPython-version-specific `.pyc` files — among them a stale `TxParser.cpython-312.pyc`, bytecode for a module removed in 0.18.5. Harmless at import time, since Python only consults a `.pyc` when importing its matching `.py`, but opaque binaries have no place in an artifact that is meant to be auditable source, and they made the tarball non-reproducible. `MANIFEST.in` now excludes `*.py[cod]` and `__pycache__`, halving the sdist. Wheels were never affected: `bdist_wheel` builds from `find_packages()` rather than from `MANIFEST.in`.
 
 ## [0.18.5]:
 
