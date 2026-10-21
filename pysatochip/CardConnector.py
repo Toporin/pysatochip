@@ -3164,8 +3164,10 @@ class CardConnector:
         export_counters=3*[0x00]
         fingerprint= 4*[0x00]
         rfu= [subtype, 0x00]
-        label_size= len(label)
+        # label_size must be the UTF-8 byte length, not the character count:
+        # the card parses label_size bytes and misaligns every following field otherwise
         label_list= list(label.encode('utf8'))
+        label_size= len(label_list)
         header_list= id + [itype, origin, export] + export_counters + fingerprint + rfu + [label_size] + label_list
         header_hex= bytes(header_list).hex()
         return header_hex

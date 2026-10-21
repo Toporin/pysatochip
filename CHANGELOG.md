@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]:
+
+### Fixes
+- `make_header()` stored the label **character** count in the header's `label_size` byte while
+  appending the UTF-8 **bytes** of the label. For any non-ASCII label (e.g. "てすと": 3 characters,
+  9 bytes) the SeedKeeper applet parsed `label_size` bytes for the label and read every following
+  field (sid_pubkey, IV, padded secret size) from a shifted offset, so `seedkeeper_import_secret()`
+  failed at OP_INIT with 0x6F00 and could corrupt the card's object table (subsequent secret
+  listing failing as well). `label_size` is now the UTF-8 byte length, matching what the mobile
+  SeedKeeper app sends. ASCII-only labels were unaffected.
+
 ## [0.18.6]:
 
 **Packaging: fix the contents of the source distribution**
