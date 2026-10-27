@@ -82,7 +82,8 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.18.6: fix: include the repo-root CLI source file in the sdist. Building from
 #          the sdist (e.g. pip install --no-binary) crashed in setup.py with
 #          FileNotFoundError: satochip_cli.py.
+# v0.18.7: fix for Seedkeeper
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 6
+PYSATOCHIP_REVISION= 7
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
