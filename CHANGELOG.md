@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed at OP_INIT with 0x6F00 and could corrupt the card's object table (subsequent secret
   listing failing as well). `label_size` is now the UTF-8 byte length, matching what the mobile
   SeedKeeper app sends. ASCII-only labels were unaffected.
+- `CertificateValidator` raised `FileNotFoundError` when a CA or subCA certificate file was
+  missing from `pysatochip/cert/`. Since a chain that fails production validation is retried
+  against the test CA, this crashed `card_verify_authenticity()` for any non-production card in
+  applications that bundle only the production certificates (e.g. a PyInstaller build). A missing
+  certificate now makes that chain invalid with an "Unable to load CA certificate" error, and the
+  production validation result is returned as before.
 
 ## [0.18.6]:
 

@@ -13,13 +13,16 @@ device certificate, which we cannot mint without the real subCA private key.
 
 import datetime
 import os
+import shutil
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), os.pardir))
 
-from pysatochip import ec_backend
+from pysatochip import certificate_validator, ec_backend
 from pysatochip.certificate_validator import HAS_OPENSSL, CertificateValidator
 
 CERT_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "pysatochip", "cert")
@@ -198,6 +201,38 @@ class TestShippedCertificates(unittest.TestCase):
         cv = CertificateValidator(backend="pycryptodomex")
         result = cv.parse_pem_certificate(read_cert("ca.cert"))
         self.assertTrue(result)
+
+
+class TestMissingCertificates(unittest.TestCase):
+    """A missing CA file (e.g. a frozen app that did not bundle the test CA)
+    must be reported as an invalid chain, not raised."""
+
+    def setUp(self):
+        self.cert_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cert_dir)
+        patcher = mock.patch.object(certificate_validator, "CERT_DIR", self.cert_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_missing_ca_is_reported(self):
+        cv = CertificateValidator(backend="pycryptodomex")
+        ok, _pub, _ca, _sub, _dev, err = cv._validate_chain(
+            read_cert("subca-satodime.cert"), "Satodime")
+        self.assertFalse(ok)
+        self.assertIn("Unable to load CA certificate", err)
+
+    def test_missing_test_ca_falls_back_to_production_error(self):
+        """Only the production certificates are present: the test-CA retry
+        fails to load and the production validation result is returned."""
+        for name in ("ca.cert", "subca-satodime.cert"):
+            shutil.copy(os.path.join(CERT_DIR, name), self.cert_dir)
+        cv = CertificateValidator(backend="pycryptodomex")
+        # a subCA certificate is not signed by the satodime subCA: invalid chain
+        ok, _pub, _ca, _sub, _dev, err = cv.validate_certificate_chain(
+            read_cert("subca-satochip.cert"), "Satodime")
+        self.assertFalse(ok)
+        self.assertTrue(err)
+        self.assertNotIn("Unable to load CA certificate", err)
 
 
 class TestBackendSelection(unittest.TestCase):

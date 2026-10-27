@@ -12,6 +12,9 @@ except Exception:  # pragma: no cover - optional dependency
 from . import set_log_level
 
 logger = logging.getLogger(__name__)
+
+# root CA and subCA certificates shipped with the package
+CERT_DIR = os.path.join(os.path.dirname(__file__), "cert")
 # NB: no logger.setLevel() here on purpose. Module loggers must stay at NOTSET
 # so that a level set on the `pysatochip` package logger cascades to all of
 # them -- see pysatochip.set_log_level().
@@ -61,7 +64,7 @@ class CertificateValidator:
         device_pubkey= bytes(65*[0])
         
         # load subca according to device type
-        directory=os.path.join(os.path.dirname(__file__), "cert")
+        directory=CERT_DIR
         if not use_test:
             path_ca = os.path.join(directory, 'ca.cert')
             if device_type=="SeedKeeper":
@@ -87,13 +90,16 @@ class CertificateValidator:
                 return False, device_pubkey, txt_ca, txt_subca, txt_device, txt_error
             
             
-        # todo: FileNotFoundError
-        with open(path_ca, 'r', encoding='utf-8') as f:
-                    ca_pem = f.read()
-                    #logger.debug("CA pem: " + ca_pem)
-        with open(path_subca, 'r', encoding='utf-8') as f:
-                    subca_pem = f.read()
-                    #logger.debug("SUBCA pem: " + subca_pem)
+        # a missing certificate (e.g. not bundled by a frozen app) means the chain cannot be validated
+        try:
+            with open(path_ca, 'r', encoding='utf-8') as f:
+                ca_pem = f.read()
+            with open(path_subca, 'r', encoding='utf-8') as f:
+                subca_pem = f.read()
+        except OSError as ex:
+            logger.warning(f"Unable to load CA certificate: {ex}")
+            txt_error= f"Unable to load CA certificate: {ex}"
+            return False, device_pubkey, txt_ca, txt_subca, txt_device, txt_error
 
         use_openssl = HAS_OPENSSL and self.backend != "pycryptodomex"
         if self.backend == "openssl" and not HAS_OPENSSL:
