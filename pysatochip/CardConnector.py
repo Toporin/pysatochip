@@ -166,21 +166,10 @@ class RemovalObserver(CardObserver):
             self.cc.cardservice.connection.connect()
             self.cc.cardservice.connection.addObserver(self.observer)
             
-            # get CPLC
-            try:
-                (response_CPLC, sw1, sw2) = self.cc.card_get_CPLC()
-                logger.debug(f"DEBUG CPLC: {bytes(response_CPLC).hex()}")
-                (response_IIN, sw1, sw2) = self.cc.card_get_IIN()
-                logger.debug(f"DEBUG IIN: {bytes(response_IIN).hex()}")
-                (response_CIN, sw1, sw2) = self.cc.card_get_CIN()
-                logger.debug(f"DEBUG CIN: {bytes(response_CIN).hex()}")
-                self.cc.UID= response_CPLC+response_IIN+response_CIN
-                logger.debug(f"DEBUG UID: {bytes(self.cc.UID).hex()}")
-                self.cc.UID_SHA1= hashlib.sha1(bytes(self.cc.UID)).hexdigest()
-                logger.debug(f"DEBUG UID_SHA1: {self.cc.UID_SHA1}")
-            except Exception as exc:
-                logger.warning(f"Error during CPLC/IIN/CIN: {repr(exc)}")
-                
+            # get the card serial number (CPLC/IIN/CIN), used as certificate subject.
+            # Must run before the applet SELECT below, which deselects the ISD.
+            self.cc.card_read_serial_number()
+
             #select applet
             try:
                 (response, sw1, sw2) = self.cc.card_select()
@@ -260,6 +249,10 @@ class CardConnector:
         self.unlock_counter= SIZE_UNLOCK_COUNTER*[0x00]
         # Satodime, SeedKeeper or Satochip?
         self.card_filter= card_filter # limit card_select to a subset of [satochip, seedkeeper, satodime]
+        # card serial number (CPLC||IIN||CIN) and its SHA1, set on card insertion
+        # by card_read_serial_number(); None if unavailable
+        self.UID= None
+        self.UID_SHA1= None
         self.card_type= "card"
         self.cert_pem=None # PEM certificate of device, if any
         # cache protocol version (version x.y => 256*x+y)
@@ -353,6 +346,91 @@ class CardConnector:
         logger.debug('In card_get_ATR()')
         return self.cardservice.connection.getATR()
     
+    # AIDs tried, in order, to select the GlobalPlatform Issuer Security Domain
+    # (Card Manager). The empty AID selects the ISD on any GlobalPlatform card; the
+    # explicit AIDs (GP 2.2+ and legacy Visa OpenPlatform) are fallbacks.
+    ISD_AIDS = [
+        [],
+        [0xA0, 0x00, 0x00, 0x01, 0x51, 0x00, 0x00, 0x00],
+        [0xA0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00],
+    ]
+
+    def card_select_isd(self):
+        """Select the GlobalPlatform Issuer Security Domain (Card Manager).
+
+        GET DATA for CPLC/IIN/CIN is processed by the ISD. Most cards select it
+        implicitly at power-up, but not all: when an applet has been installed
+        with the default-selected (Card Reset) privilege, or that privilege was
+        removed from the ISD during personalization, the ISD is not selected and
+        the GET DATA commands fail (e.g. 0x6D00 / 0x6E00). An applet selected by
+        a previous connection may also still be active. Selecting the ISD
+        explicitly makes the serial number independent of the card configuration.
+
+        Returns (response, sw1, sw2) of the last SELECT tried.
+        """
+        logger.debug("In card_select_isd")
+        response, sw1, sw2 = [], 0x00, 0x00
+        for aid in CardConnector.ISD_AIDS:
+            apdu = CardConnector.SELECT + [len(aid)] + aid
+            if aid:
+                apdu += [0x00]  # Le
+            # bypass card_transmit checks (no secure channel, raw SW handled here)
+            (response, sw1, sw2) = self.cardservice.connection.transmit(apdu)
+            if self.get_sw12(sw1, sw2) == JCconstants.SW_OK:
+                break
+        return (response, sw1, sw2)
+
+    def card_read_serial_number(self):
+        """Read the card serial number and store it in self.UID / self.UID_SHA1.
+
+        The serial number is CPLC || IIN || CIN, as returned by GlobalPlatform
+        GET DATA; its SHA1 is the subject CN of the personalization certificate.
+        CPLC is mandatory. IIN and CIN are optional and taken as empty when not
+        available (typically 0x6A88), which matches how existing certificates
+        were issued.
+
+        Returns the hex SHA1 of the serial number, or None (and self.UID /
+        self.UID_SHA1 are then None) when it cannot be read: the SHA1 of an
+        empty or partial serial number would never match a certificate.
+        """
+        logger.debug("In card_read_serial_number")
+        self.UID = None
+        self.UID_SHA1 = None
+        try:
+            (response, sw1, sw2) = self.card_select_isd()
+            if self.get_sw12(sw1, sw2) != JCconstants.SW_OK:
+                # Still try the GET DATA: the ISD may be implicitly selected.
+                logger.warning(f"Unable to select the card manager (ISD): SW {sw1:02X}{sw2:02X}")
+
+            (response_CPLC, sw1, sw2) = self.card_get_CPLC()
+            if self.get_sw12(sw1, sw2) != JCconstants.SW_OK or len(response_CPLC) == 0:
+                logger.warning(f"Unable to read the card serial number: GET DATA CPLC returned SW {sw1:02X}{sw2:02X}")
+                return None
+            logger.debug(f"DEBUG CPLC: {bytes(response_CPLC).hex()}")
+
+            (response_IIN, sw1, sw2) = self.card_get_IIN()
+            if self.get_sw12(sw1, sw2) != JCconstants.SW_OK:
+                logger.debug(f"IIN not available: SW {sw1:02X}{sw2:02X}")
+                response_IIN = []
+            logger.debug(f"DEBUG IIN: {bytes(response_IIN).hex()}")
+
+            (response_CIN, sw1, sw2) = self.card_get_CIN()
+            if self.get_sw12(sw1, sw2) != JCconstants.SW_OK:
+                logger.debug(f"CIN not available: SW {sw1:02X}{sw2:02X}")
+                response_CIN = []
+            logger.debug(f"DEBUG CIN: {bytes(response_CIN).hex()}")
+
+            uid = list(response_CPLC) + list(response_IIN) + list(response_CIN)
+            self.UID = uid
+            self.UID_SHA1 = hashlib.sha1(bytes(uid)).hexdigest()
+            logger.debug(f"DEBUG UID: {bytes(self.UID).hex()}")
+            logger.debug(f"DEBUG UID_SHA1: {self.UID_SHA1}")
+        except Exception as exc:
+            logger.warning(f"Error during CPLC/IIN/CIN: {repr(exc)}")
+            self.UID = None
+            self.UID_SHA1 = None
+        return self.UID_SHA1
+
     def card_get_CPLC(self):
         logger.debug("In card_get_CPLC")
         cla= 0x80 #CLA_GP
@@ -397,6 +475,8 @@ class CardConnector:
         self.sc= None # a new card needs a new secure channel
         self.card_present= False
         self.card_type= "card"
+        self.UID= None # serial number of the removed card must not outlive it
+        self.UID_SHA1= None
         if self.cardservice:
             self.cardservice.connection.disconnect()
             self.cardservice= None
@@ -3854,6 +3934,10 @@ class CardConnector:
         validator = CertificateValidator(backend=backend)
 
         # Check that the certificate subject matches the device serial number
+        if not self.UID_SHA1:
+            txt_error= ''.join(["Unable to read the card serial number (GlobalPlatform CPLC), ",
+                                "so the certificate subject cannot be checked!"])
+            return False, txt_ca, txt_subca, txt_device, txt_error
         cert_dict =  validator.parse_pem_certificate(cert_pem)
         subject_dict= cert_dict['subject']
         logger.debug(f'In card_verify_authenticity subject_dict= {subject_dict}')

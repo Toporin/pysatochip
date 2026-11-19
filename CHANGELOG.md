@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]:
+## [0.18.8]:
+
+**Authenticity check: read the card serial number from the Card Manager**
+
+### Fixes
+- The card serial number (CPLC || IIN || CIN, whose SHA1 is the personalization certificate
+  subject) was read with GlobalPlatform GET DATA without selecting the Card Manager (ISD) and
+  without checking the status words. On cards where the ISD is not implicitly selected at
+  power-up (e.g. a Seedkeeper Pro with several applets, where no applet is default-selected and
+  every non-SELECT command returns 0x6D00), all three reads failed silently, the serial number
+  was empty and `card_verify_authenticity()` reported a genuine card as not authentic
+  ("Certificate subject ... does not match the card serial number da39a3ee..."). The new
+  `card_read_serial_number()` selects the ISD first (empty AID, then `A000000151000000` and
+  `A000000003000000`), requires CPLC to succeed and treats a missing IIN/CIN (0x6A88) as empty,
+  so hashes of existing cards are unchanged. When the serial number cannot be read, `UID` /
+  `UID_SHA1` are now `None` and authenticity fails with an explicit "Unable to read the card
+  serial number" error. They are also reset on card removal, so a previous card's serial number
+  can no longer be reused.
+
+## [0.18.7]:
+
+**SeedKeeper: fix import of secrets with non-ASCII labels**
 
 ### Fixes
 - `make_header()` stored the label **character** count in the header's `label_size` byte while

@@ -259,7 +259,10 @@ def common_get_card_CIN():
 @main.command()
 def common_get_card_uid_sha1():
     """Get the Serial Number for the Device (Used this as the Subject CN for a personalisation certificate)"""
-    print(cc.UID_SHA1.lower())
+    if cc.UID_SHA1 is None:
+        print("Unable to read the card serial number (GlobalPlatform CPLC)")
+    else:
+        print(cc.UID_SHA1.lower())
 
 @main.command()
 def common_get_card_status():
