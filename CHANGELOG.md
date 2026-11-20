@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]:
+
+### Fixes
+- The `pyopenssl>=20.0.0` requirement let pip keep an old pyOpenSSL already present on the
+  system (e.g. Ubuntu 22.04's 21.0.0, visible from a `--system-site-packages` venv) next to a
+  current cryptography. pyOpenSSL 21 cannot be imported with cryptography 50 (`AttributeError:
+  module 'lib' has no attribute 'GEN_EMAIL'`), so certificate validation silently fell back to
+  the pure-python backend and the certificate text dumps were replaced by "OpenSSL module not
+  available". The minimum is now `pyopenssl>=24.0.0`, the first release compatible with
+  `cryptography>=42`; later releases declare an upper bound on cryptography, so pip always
+  installs a compatible pair. `certificate_validator` now logs a warning when pyOpenSSL is
+  installed but fails to import, instead of treating it as absent.
+
 ## [0.18.8]:
 
 **Authenticity check: read the card serial number from the Card Manager**

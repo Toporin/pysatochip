@@ -1,17 +1,31 @@
 import os
 import logging
 
+# pyOpenSSL is optional: without it, certificate chains are validated in pure
+# Python and the certificate text dumps are unavailable. Keep the reason it
+# could not be imported, so that a broken install is not silently mistaken for
+# a missing one (e.g. pyOpenSSL 21 cannot be imported next to cryptography>=42).
+OPENSSL_IMPORT_ERROR = None
 try:
     import OpenSSL
     HAS_OPENSSL = True
-except Exception:  # pragma: no cover - optional dependency
+except Exception as _ex:  # pragma: no cover - optional dependency
     OpenSSL = None
     HAS_OPENSSL = False
+    OPENSSL_IMPORT_ERROR = _ex
 
 
 from . import set_log_level
 
 logger = logging.getLogger(__name__)
+
+if OPENSSL_IMPORT_ERROR is not None and not (
+        isinstance(OPENSSL_IMPORT_ERROR, ModuleNotFoundError)
+        and OPENSSL_IMPORT_ERROR.name == "OpenSSL"):
+    # pyOpenSSL is installed but broken (typically incompatible with the
+    # installed cryptography version): report it instead of falling back silently.
+    logger.warning(f"pyOpenSSL is installed but cannot be imported, using the pure-python "
+                   f"certificate validation: {OPENSSL_IMPORT_ERROR!r}")
 
 # root CA and subCA certificates shipped with the package
 CERT_DIR = os.path.join(os.path.dirname(__file__), "cert")
