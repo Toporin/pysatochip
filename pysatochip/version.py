@@ -86,7 +86,9 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 # v0.18.8: fix: select the Card Manager (ISD) before reading the card serial number
 #          (CPLC/IIN/CIN) and check the status words. Cards with no implicitly
 #          selected ISD (e.g. Seedkeeper Pro) failed the authenticity check.
+# v0.18.9: fix: require pyopenssl>=24.0.0 (pyOpenSSL 21 cannot be imported with
+#          cryptography 50) and warn when pyOpenSSL is installed but broken.
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 8
+PYSATOCHIP_REVISION= 9
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)
