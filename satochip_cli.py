@@ -43,6 +43,7 @@ from pysatochip.CardConnector import (CardConnector, IncorrectUnlockCodeError, I
 from pysatochip.JCconstants import *
 from pysatochip.Satochip2FA import Satochip2FA, SERVER_LIST
 from pysatochip.SecretDecryption import Decrypt_Secret
+from pysatochip.CardDataParser import encode_password_label, is_password_with_label_meta
 from pysatochip.electrum_mnemonic import Mnemonic as electrum_mnemonic
 from pysatochip.electrum_mnemonic import seed_type as electrum_seedtype
 from pysatochip.util import list_hyphenated_values, dict_swap_keys_values
@@ -1810,12 +1811,14 @@ def seedkeeper_derive_master_password(salt, sid, pubkey_id):
 
 @main.command()
 @click.option("--type", required=True, help="Plaintext file with secret to import (Raw secret-dict)")
-@click.option("--subtype", type=int, default=0, help="Further specify type of secret, default = 0 (unspecified). To be detailed!")
-@click.option("--label", required=True, help="Label for the secret")
+@click.option("--subtype", type=int, default=0, help="Further specify type of secret, default = 0 (unspecified). For Password, subtype 1 stores label (descriptor), login and url in the secret header.")
+@click.option("--label", default="", help="Label for the secret (the descriptor for a Password with subtype 1)")
+@click.option("--login", default="", help="Login, only for a Password with subtype 1")
+@click.option("--url", default="", help="URL, only for a Password with subtype 1")
 @click.option("--export-rights", required=True, help="Export Rights for the secret")
 @click.option("--use-passphrase", is_flag=True, help="Use a BIP39 Passphrase")
 @click.option("--wordlist", default="english", help="Define which worldlist (language) to use for BIP39 v2")
-def seedkeeper_import_secret(type, subtype, label, export_rights, use_passphrase, wordlist):
+def seedkeeper_import_secret(type, subtype, label, login, url, export_rights, use_passphrase, wordlist):
     """Import a Secret into the Seedkeeper"""
 
     # get PIN from environment variable or interactively
@@ -1838,7 +1841,17 @@ def seedkeeper_import_secret(type, subtype, label, export_rights, use_passphrase
     # Swap underscores for spaces... Simplest solution to keep click happy and still use types directly from the dictionaries
     export_rights = export_rights.replace("_", " ")
     type = type.replace("_", " ")
-    header = cc.make_header(type, export_rights, label, subtype= subtype)
+    try:
+        if is_password_with_label_meta(dict_swap_keys_values(SEEDKEEPER_DIC_TYPE)[type], subtype):
+            header = cc.make_header(type, export_rights, encode_password_label(label, login, url), subtype= subtype)
+        elif login or url:
+            print("--login and --url are only supported for a Password with subtype 1")
+            exit()
+        else:
+            header = cc.make_header(type, export_rights, label, subtype= subtype)
+    except ValueError as e:
+        print(f"INVALID LABEL: {e}")
+        exit()
     
     # get secret and optionnaly passphrase
     secret = input("Enter your secret:")
@@ -2101,6 +2114,16 @@ def seedkeeper_export_secret(sid, pubkey_id, export_dict):
                         passphrase = f"failed to decode passphrase bytes: {passphrase_bytes.hex()}"
 
                     secret_string= f'\nWordlist: {wordlist} \nBIP39 mnemonic: "{bip39_mnemonic}" \nPassphrase: "{passphrase}" \nMasterseed: {masterseed_hex}'
+
+                elif 'label_dict' in secret_dict:
+                    # Password with subtype 1: [password_size(1b) | password], metadata in the label
+                    secret_bytes = bytes(secret_dict['secret_list'])
+                    password_text = secret_bytes[1:1 + secret_bytes[0]].decode()
+                    label_dict = secret_dict['label_dict']
+                    secret_string = (f'\nPassword: "{password_text}"'
+                                     f'\nDescriptor: "{label_dict["descriptor"]}"'
+                                     f'\nLogin: "{label_dict["login"]}"'
+                                     f'\nURL: "{label_dict["url"]}"')
 
                 elif stype == 'Password':
 

@@ -88,6 +88,42 @@ python3 satochip_cli.py --verbose satochip-import-unencrypted-mnemonic
 python3 satochip_cli.py --verbose satochip-sign-nostr-event --path "m/44'/0'/0'/0/0" --message "Hello, world" --kind 1 --broadcast
 ```
 
+## SeedKeeper operations
+
+* List secrets (header) stored in the card:
+```commandline
+python3 satochip_cli.py seedkeeper-list-secret-headers 
+```
+
+* Import a password together with its descriptor, login and url (subtype 1).
+These three fields are stored in the secret label (127 bytes max in total, at least one
+must be set) and the secret only holds the password, which is prompted for:
+```commandline
+python3 satochip_cli.py seedkeeper-import-secret --type Password --subtype 1 --label "mail" --login "alice" --url "https://mail.example.com" --export-rights Plaintext_export_allowed
+```
+
+* Export a secret:
+```commandline
+python3 satochip_cli.py seedkeeper-export-secret --sid 
+```
+
+## Satodime operations
+
+* Get NDEF info:
+```commandline
+python3 satochip_cli.py common-get-card-ndef
+```
+
+* Set NDEF policy to 1 (static NDEF):
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1
+```
+
+* Set NDEF policy to 1 (static NDEF) and NDEF data to "org.satochip.satodimeapp":
+```commandline
+python3 satochip_cli.py common-set-card-ndef --policy 1 --ndef 002ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
+```
+
 ## Satocash operations 
 
 * setup card (once):
@@ -165,19 +201,3 @@ python3 satochip_cli.py satocash-export-p2pk-sig --index 0
 python3 satochip_cli.py satocash-export-tokenv4 --unit "sat" --amount 8
 ```
 
-## Satodime operations
-
-* Get NDEF info:
-```commandline
-python3 satochip_cli.py common-get-card-ndef
-```
-
-* Set NDEF policy to 1 (static NDEF):
-```commandline
-python3 satochip_cli.py common-set-card-ndef --policy 1
-```
-
-* Set NDEF policy to 1 (static NDEF) and NDEF data to "org.satochip.satodimeapp":
-```commandline
-python3 satochip_cli.py common-set-card-ndef --policy 1 --ndef 002ad40f18616e64726f69642e636f6d3a706b676f72672e7361746f636869702e7361746f64696d65617070
-```
