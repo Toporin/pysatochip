@@ -88,7 +88,8 @@ SATOCASH_PROTOCOL_VERSION= (SATOCASH_PROTOCOL_MAJOR_VERSION<<8)+SATOCASH_PROTOCO
 #          selected ISD (e.g. Seedkeeper Pro) failed the authenticity check.
 # v0.18.9: fix: require pyopenssl>=24.0.0 (pyOpenSSL 21 cannot be imported with
 #          cryptography 50) and warn when pyOpenSSL is installed but broken.
+# v0.18.10: Add support for new SeedKeeper secret of type 'PASSWORD' and subtype 'SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META'
 PYSATOCHIP_MAJOR_VERSION= 0
 PYSATOCHIP_MINOR_VERSION= 18
-PYSATOCHIP_REVISION= 9
+PYSATOCHIP_REVISION= 10
 PYSATOCHIP_VERSION= str(PYSATOCHIP_MAJOR_VERSION) + '.' + str(PYSATOCHIP_MINOR_VERSION) + '.' + str(PYSATOCHIP_REVISION)

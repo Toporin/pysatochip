@@ -40,6 +40,14 @@ SEEDKEEPER_DIC_TYPE = {
     0xC1: 'Descriptor'
 }
 
+# Secret types and subtypes that need specific handling on the host side
+SEEDKEEPER_SECRET_TYPE_PASSWORD = 0x90
+# Password whose descriptor, login and url are stored in the header label
+# (see CardDataParser.encode_password_label); the secret holds only the password.
+SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META = 0x01
+# Maximum size in bytes of a secret label, enforced by the applet
+SEEDKEEPER_MAX_LABEL_SIZE = 127
+
 SEEDKEEPER_DIC_ORIGIN = {0x01: 'Plaintext import', 0x02: 'Encrypted import', 0x03: 'Generated on card'}
 SEEDKEEPER_DIC_EXPORT_RIGHTS = {0x00: 'Export forbidden', 0x01: 'Plaintext export allowed', 0x02: 'Encrypted export only', 0x03: 'Authenticated export only'}
 SEEDKEEPER_DIC_USAGE_RIGHTS = {0x00: 'Usage forbidden', 0x10: 'Plaintext usage allowed', 0x20: 'Encrypted usage only', 0x30: 'Authenticated usage only'}

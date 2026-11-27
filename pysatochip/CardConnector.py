@@ -7,7 +7,7 @@ from smartcard.util import toHexString, toBytes
 from smartcard.sw.SWExceptions import SWException
 
 from .JCconstants import *
-from .CardDataParser import CardDataParser
+from .CardDataParser import CardDataParser, decode_password_label, is_password_with_label_meta
 from .ecc import ECPubkey, ECPrivkey
 # SecureChannelError / UninitializedSecureChannelError are defined in SecureChannel.py
 # and re-exported here on purpose: AGENTS.md documents the protocol exceptions as
@@ -2806,9 +2806,23 @@ class CardConnector:
 
 
     def seedkeeper_import_secret(self, secret_dic, sid_pubkey=None):
+        """Import a secret into the SeedKeeper.
+
+        secret_dic['header'] is the hex header built by make_header() (or exported
+        by a card). For a Password with subtype SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META,
+        the label must be built with CardDataParser.encode_password_label() and the
+        secret is [password_size(1b) | password_utf8].
+        """
         logger.debug("In seedkeeper_import_secret")
         
         is_secure_import= False if (sid_pubkey is None) else True
+        if not is_secure_import:
+            # Refuse to store a malformed structured label: the card treats the
+            # label as opaque bytes and would accept it. Encrypted imports pass the
+            # exporting card's header through unchanged.
+            header_dict= self.parser.parse_seedkeeper_header(list(bytes.fromhex(secret_dic['header'])))
+            if is_password_with_label_meta(header_dict.get('type'), header_dict.get('subtype')):
+                decode_password_label(header_dict.get('label_list', []))
         if (is_secure_import):
             secret_list= list(bytes.fromhex(secret_dic['secret_encrypted']))
             padded_secret_size = len(secret_list) # encrypted_secret is already padded!
@@ -2904,6 +2918,12 @@ class CardConnector:
         return id, fingerprint_from_seedkeeper
         
     def seedkeeper_export_secret(self, sid, sid_pubkey= None):
+        """Export a secret, in plaintext or encrypted for sid_pubkey.
+
+        Returns the header fields from CardDataParser.parse_seedkeeper_header()
+        (including 'label', and 'label_dict' for a Password with a structured
+        label) plus the secret data.
+        """
         logger.debug("In seedkeeper_export_secret")
 
         # Initialise self.parser.authentikey if not done already (If it is none, this function will crash)
@@ -3102,6 +3122,9 @@ class CardConnector:
         return secret_dict
     
     def seedkeeper_list_secret_headers(self):
+        """Return the list of secret headers, as parsed by
+        CardDataParser.parse_seedkeeper_header() ('label', and 'label_dict' for a
+        Password with a structured label)."""
         logger.debug("In seedkeeper_list_secret_headers")
         cla= JCconstants.CardEdge_CLA
         ins= 0xA6
@@ -3230,7 +3253,13 @@ class CardConnector:
             
         return (logs, nbtotal_logs, nbavail_logs)
     
-    def make_header(self, secret_type, export_rights, label, subtype = 0x00):
+    def make_header(self, secret_type, export_rights, label: Union[str, bytes, List[int]], subtype = 0x00):
+        """Build the hex header of a secret to import.
+
+        label is either a str (stored UTF-8 encoded) or the already encoded label
+        bytes, e.g. from CardDataParser.encode_password_label(). Raises ValueError
+        if the label exceeds SEEDKEEPER_MAX_LABEL_SIZE bytes.
+        """
         id=2*[0x00]
         if type(secret_type) is str:
             itype= dict_swap_keys_values(SEEDKEEPER_DIC_TYPE)[secret_type]
@@ -3246,8 +3275,10 @@ class CardConnector:
         rfu= [subtype, 0x00]
         # label_size must be the UTF-8 byte length, not the character count:
         # the card parses label_size bytes and misaligns every following field otherwise
-        label_list= list(label.encode('utf8'))
+        label_list= list(label.encode('utf8')) if isinstance(label, str) else list(label)
         label_size= len(label_list)
+        if label_size > SEEDKEEPER_MAX_LABEL_SIZE:
+            raise ValueError(f"Label too long: {label_size} bytes (max {SEEDKEEPER_MAX_LABEL_SIZE})")
         header_list= id + [itype, origin, export] + export_counters + fingerprint + rfu + [label_size] + label_list
         header_hex= bytes(header_list).hex()
         return header_hex

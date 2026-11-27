@@ -39,6 +39,58 @@ MSG_WARNING= ("Before you request bitcoins to be sent to addresses in this "
                     "its seed (and passphrase, if any).  Otherwise all bitcoins you "
                     "receive will be unspendable.")
 
+# Fields of the structured label of a Password secret with subtype
+# SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META, in wire order.
+PASSWORD_LABEL_FIELDS = ('descriptor', 'login', 'url')
+
+def encode_password_label(descriptor: str = '', login: str = '', url: str = '') -> List[int]:
+    """Encode the label of a Password secret with subtype LABEL_WITH_META.
+
+    Format: [descriptor_size(1b) | descriptor | login_size(1b) | login | url_size(1b) | url]
+    where each field is UTF-8 encoded and may be empty, but not all of them.
+    Raises ValueError if every field is empty or the label exceeds
+    SEEDKEEPER_MAX_LABEL_SIZE bytes (size bytes included).
+    """
+    label = []
+    for field in (descriptor, login, url):
+        field_bytes = list(field.encode('utf-8'))
+        label += [len(field_bytes)] + field_bytes # a field over 255 bytes fails the total size check
+    if len(label) == len(PASSWORD_LABEL_FIELDS):
+        raise ValueError("Password label: at least one of descriptor, login or url must be set")
+    if len(label) > SEEDKEEPER_MAX_LABEL_SIZE:
+        raise ValueError(f"Password label too long: {len(label)} bytes (max {SEEDKEEPER_MAX_LABEL_SIZE})")
+    return label
+
+def decode_password_label(label) -> dict:
+    """Decode a label built by encode_password_label() into
+    {'descriptor': str, 'login': str, 'url': str}.
+
+    Strict on purpose: raises ValueError if a size overruns the label, bytes
+    remain after the url, or a field is not valid UTF-8.
+    """
+    label = bytes(label)
+    label_dict = {}
+    offset = 0
+    for name in PASSWORD_LABEL_FIELDS:
+        if offset >= len(label):
+            raise ValueError(f"Password label truncated before field '{name}'")
+        size = label[offset]
+        offset += 1
+        if offset + size > len(label):
+            raise ValueError(f"Password label field '{name}' overruns the label")
+        try:
+            label_dict[name] = label[offset:offset + size].decode('utf-8')
+        except UnicodeDecodeError:
+            raise ValueError(f"Password label field '{name}' is not valid UTF-8")
+        offset += size
+    if offset != len(label):
+        raise ValueError("Password label has trailing bytes")
+    return label_dict
+
+def is_password_with_label_meta(secret_type: int, subtype: int) -> bool:
+    return (secret_type == SEEDKEEPER_SECRET_TYPE_PASSWORD
+            and subtype == SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META)
+
 class CardDataParser:
 
     def __init__(self, loglevel= None):
@@ -555,11 +607,25 @@ class CardDataParser:
             return header_dict
             
         header_dict['label_list']= response[15:(15+header_dict['label_size'])]
-        try:
-            header_dict['label']=  bytes(header_dict['label_list']).decode("utf-8") 
-        except UnicodeDecodeError as e:
-            logger.warning("UnicodeDecodeError while decoding label header!")
-            header_dict['label']=  str(bytes(header_dict['label_list']))
+        header_dict['label']= None
+        if is_password_with_label_meta(header_dict['type'], header_dict['subtype']):
+            # Structured label: 'label' joins the non-empty fields with '|' for
+            # display only. It cannot be split back reliably (empty fields are
+            # dropped and a field may itself contain '|'): use 'label_dict' or the
+            # raw 'header' bytes instead.
+            # The size bytes are valid ASCII, so the plain decode below would not
+            # fail on such a label: the dispatch must be on type/subtype.
+            try:
+                header_dict['label_dict']= decode_password_label(header_dict['label_list'])
+                header_dict['label']= '|'.join(v for v in header_dict['label_dict'].values() if v)
+            except ValueError as e:
+                logger.warning(f"Malformed password label, decoding it as plain text: {e}")
+        if header_dict['label'] is None:
+            try:
+                header_dict['label']=  bytes(header_dict['label_list']).decode("utf-8")
+            except UnicodeDecodeError as e:
+                logger.warning("UnicodeDecodeError while decoding label header!")
+                header_dict['label']=  str(bytes(header_dict['label_list']))
         header_dict['header_list']=  response[0:(15+header_dict['label_size'])]
         header_dict['header']=  bytes(header_dict['header_list']).hex()
         

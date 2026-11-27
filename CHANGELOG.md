@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.10]:
+
+**SeedKeeper: Password secrets with login and url in the label**
+
+### Added
+- Support for Password secrets (type 0x90) with subtype
+  `SEEDKEEPER_PASSWORD_SUBTYPE_LABEL_WITH_META` (0x01). The secret holds only the password,
+  `[password_size(1b) | password]`, while the descriptor, login and url are stored in the
+  header label as `[descriptor_size(1b) | descriptor | login_size(1b) | login | url_size(1b) | url]`
+  (UTF-8, each optional but not all empty, 127 bytes max in total). Keeping them in the label
+  makes them visible when listing secrets, without exporting the password.
+- `CardDataParser.encode_password_label()` / `decode_password_label()` build and parse such
+  a label. `parse_seedkeeper_header()` returns the fields in a new `label_dict` key, and
+  `label` holds their non-empty values joined with '|', for display. That string cannot be
+  split back reliably (empty fields are dropped and a field may contain '|'), so never rebuild
+  a header from it: use `header` or `label_dict`.
+- `make_header()` accepts an already encoded label (`bytes` or list of ints) and rejects labels
+  over 127 bytes. `seedkeeper_import_secret()` refuses a malformed label for this subtype
+  before sending anything to the card, which would store it as is.
+- CLI: `seedkeeper-import-secret --type Password --subtype 1` takes `--label` (descriptor),
+  `--login` and `--url`; `--label` is no longer mandatory. `seedkeeper-export-secret` shows the
+  three fields.
+
+### Compatibility
+- The label is no longer always a UTF-8 string. The applet stores it as opaque bytes, so
+  nothing changes on the card. The size bytes are valid ASCII, so older pysatochip versions
+  (and applications built on them) decode such a label without error and display it with
+  control characters, e.g. `'\x04mail\x05alice...'`.
+- Card-to-card transfer keeps the structured label, as import uses the raw `header`. Note
+  that the label is not covered by the secure export hmac (by applet design), so
+  descriptor, login and url can be altered in transit, unlike the password and subtype.
+
 ## [0.18.9]:
 
 **Dependencies: require a pyOpenSSL compatible with current cryptography**
